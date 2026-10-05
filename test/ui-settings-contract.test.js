@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const html = fs.readFileSync('index.html', 'utf8');
 const ui = fs.readFileSync('js/ui.js', 'utf8');
 const core = fs.readFileSync('js/core.js', 'utf8');
+const css = fs.readFileSync('css/style.css', 'utf8');
 
 test('setup exposes bounded bomb inventory and session-only AI options', () => {
   assert.match(html, /id="cfgBombs"[^>]*max="999"/);
@@ -40,6 +41,18 @@ test('game-over announces the winning side and leaves the board available for re
   assert.match(onGameOver, /victoryCelebration\.start\(label\(game\.winner\) \+ '获胜！'\)/);
   assert.doesNotMatch(onGameOver, /showModal|fillResult|dlgResult/);
   assert.doesNotMatch(html, /id="boardOverlay"|id="dlgResult"/);
+});
+
+test('mine captures pulse in the scorer color and show a floating point while keeping ownership visible', () => {
+  const render = ui.match(/function render\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+
+  assert.match(render, /lm\.kind === 'mine'[\s\S]*mine-capture/);
+  assert.match(css, /\.cell\.mine\.owner-blue\s*\{[^}]*background:/);
+  assert.match(css, /\.cell\.mine\.owner-red\s*\{[^}]*background:/);
+  assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*content:\s*['"]\+1['"]/);
+  assert.match(css, /\.cell\.mine-capture\s*\{[^}]*pointer-events:\s*none/);
+  assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*pointer-events:\s*none/);
+  assert.match(css, /@keyframes mineCapture/);
 });
 
 test('invalid decisions get a visible warning and legal fallback; no-move state stops', () => {

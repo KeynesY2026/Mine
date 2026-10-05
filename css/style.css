@@ -94,8 +94,28 @@ body.bombing .cell.hidden { cursor: crosshair; }
 .cell.bomb-preview-center { box-shadow: inset 0 0 0 3px #ffc94d, 0 0 16px #ffc94daa; z-index: 2; }
 .cell.revealed { background: var(--open); box-shadow: inset 0 1px 4px #00000060; cursor: default; }
 .cell.mine { background: #3a1220; }
+.cell.mine.owner-blue { --mine-owner: var(--blue); background: linear-gradient(145deg, #214b7f, #122943);
+  box-shadow: inset 0 0 0 2px #3d8bfdcc, 0 0 10px #3d8bfd55; }
+.cell.mine.owner-red { --mine-owner: var(--red); background: linear-gradient(145deg, #742b3a, #351923);
+  box-shadow: inset 0 0 0 2px #f04444cc, 0 0 10px #f0444455; }
 .cell.mine::after { content: ""; position: absolute; inset: 0; border-radius: 6px;
   background: radial-gradient(circle at 50% 50%, #ff556633 0%, transparent 70%); }
+.cell.mine-capture { z-index: 4; pointer-events: none; animation: mineCapture .78s cubic-bezier(.2,.8,.3,1); }
+.cell.mine-capture::before { content: "+1"; top: -14px; right: -7px; width: auto; height: auto;
+  padding: 2px 5px; border-radius: 999px; background: var(--mine-owner); color: #fff;
+  font-size: calc(var(--cs) * .32); line-height: 1.15; box-shadow: 0 2px 8px #0009;
+  pointer-events: none; animation: mineCapturePoints .78s ease-out forwards; }
+@keyframes mineCapture {
+  0% { transform: scale(.92); box-shadow: inset 0 0 0 2px var(--mine-owner); }
+  35% { transform: scale(1.2); box-shadow: 0 0 0 4px var(--mine-owner), 0 0 24px var(--mine-owner); }
+  68% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+@keyframes mineCapturePoints {
+  0% { opacity: 0; transform: translateY(8px) scale(.65); }
+  25% { opacity: 1; transform: translateY(-2px) scale(1.15); }
+  100% { opacity: 0; transform: translateY(-19px) scale(.95); }
+}
 .cell .num { transform: scale(0); transition: transform .18s cubic-bezier(.34,1.56,.64,1); }
 .cell.revealed .num { transform: scale(1); }
 .cell.owner-blue.revealed { outline: 1px solid #3d8bfd44; outline-offset: -1px; }

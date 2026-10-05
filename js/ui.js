@@ -149,7 +149,11 @@ function render() {
   if (lm && lm.x !== undefined) {
     const targets = (lm.kind === 'bomb' && lm.cells) ? lm.cells : [lm.y * game.w + lm.x];
     const who = lm.player === 'blue' ? 'who-blue' : 'who-red';
-    for (const i of targets) if (i >= 0 && i < game.total) cellEl(i).classList.add('lastmove', who);
+    for (const i of targets) if (i >= 0 && i < game.total) {
+      const cell = cellEl(i);
+      cell.classList.add('lastmove', who);
+      if (lm.kind === 'mine') cell.classList.add('mine-capture');
+    }
   }
   updateHUD();
 }
