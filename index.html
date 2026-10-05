@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>雷暴 · 双人对战扫雷</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo">⛔ 雷暴</div>
+    <div class="sub">双人对战扫雷 · HTML 优化版</div>
+    <div id="lastMoveBar" class="none"><span class="lmicon">⏱</span><span id="lastMoveText">尚未落子</span></div>
+    <div id="turnBadge"><span class="dot"></span><span id="turnText">准备</span></div>
+  </header>
+  <main>
+    <div id="boardWrap">
+      <div id="board"></div>
+      <div id="boardOverlay">
+        <div class="big" id="overlayBig"></div>
+        <div class="small" id="overlaySmall"></div>
+        <button class="primary" id="overlayAgain">再来一局</button>
+        <button id="overlaySettings">新对局设置</button>
+      </div>
+    </div>
+    <aside>
+      <div class="player blue" id="panelBlue">
+        <div class="phead"><span class="dot" style="width:10px;height:10px;border-radius:50%;background:var(--blue)"></span>
+          <span class="pname">蓝方</span><span class="pkind" id="kindBlue">人类</span></div>
+        <div class="scoreline"><span class="score" id="scoreBlue">0</span><span class="scoremax" id="maxBlue"></span></div>
+        <div class="bar"><i id="barBlue" style="width:0%"></i></div>
+        <div class="bombs" id="bombsBlue"></div>
+        <div class="pstats">用时 <b id="timeBlue">0.0s</b> · 回合 <b id="roundBlue">0</b></div>
+        <div class="thinking" id="thinkBlue">AI 思考中…</div>
+      </div>
+      <div class="player red" id="panelRed">
+        <div class="phead"><span class="dot" style="width:10px;height:10px;border-radius:50%;background:var(--red)"></span>
+          <span class="pname">红方</span><span class="pkind" id="kindRed">强 AI</span></div>
+        <div class="scoreline"><span class="score" id="scoreRed">0</span><span class="scoremax" id="maxRed"></span></div>
+        <div class="bar"><i id="barRed" style="width:0%"></i></div>
+        <div class="bombs" id="bombsRed"></div>
+        <div class="pstats">用时 <b id="timeRed">0.0s</b> · 回合 <b id="roundRed">0</b></div>
+        <div class="thinking" id="thinkRed">AI 思考中…</div>
+      </div>
+      <div class="btnrow">
+        <button class="primary" id="btnNewGame">新对局</button>
+        <button class="toggle bomb" id="btnBomb">💣 炸弹模式</button>
+        <button class="toggle" id="btnHint">概率提示</button>
+        <button class="toggle" id="btnCheat">作弊模式</button>
+      </div>
+      <div id="bombGuide" class="bomb-guide" aria-live="polite"></div>
+      <div class="ctl">
+        <div class="ctltitle">设置</div>
+        <label><input type="checkbox" id="chkComBomb" checked> 电脑方可使用炸弹</label>
+        <label>AI 速度 <input type="range" id="rngSpeed" min="1" max="10" value="6"><span class="val" id="speedVal">6</span></label>
+        <div class="mineinfo" id="mineInfo"></div>
+      </div>
+      <div class="ctl">
+        <div class="ctltitle">本局规则</div>
+        <div class="mineinfo" id="rulesInfo" style="margin-top:0"></div>
+      </div>
+      <div class="ctl">
+        <div class="ctltitle">会话统计</div>
+        <div class="session">
+          <span>🔵 <b id="sessBlue">0</b></span>
+          <span>🔴 <b id="sessRed">0</b></span>
+          <span>⚖ <b id="sessDraw">0</b></span>
+          <span>共 <b id="sessTotal">0</b></span>
+        </div>
+      </div>
+    </aside>
+  </main>
+  <footer>
+    规则：点开雷 +1 分并继续回合；点开数字交换回合；0 格自动展开；落后方可用炸弹强开一片区域。先拿到超过半数雷者获胜。
+    右键点击棋盘 = 概率提示 · 插件接口: <code>makeDecision(view) → {type:'open'|'bomb', x, y}</code>
+  </footer>
+</div>
+
+<dialog id="dlgNewGame">
+  <div class="dlg-head"><h2>新对局设置</h2><span class="hint">修复了原版奇数雷 no-op bug</span></div>
+  <div class="dlg-body">
+    <div class="frow">
+      <div class="fld"><label>宽度 (7–35)</label><input type="number" id="cfgW" min="7" max="35" value="15"></div>
+      <div class="fld"><label>高度 (7–35)</label><input type="number" id="cfgH" min="7" max="35" value="15"></div>
+      <div class="fld"><label>雷密度 % (10–90)</label><input type="number" id="cfgPct" min="10" max="90" value="23"></div>
+      <div class="fld"><label>雷数（自动奇数）</label><input type="number" id="cfgMines" min="1" value="53"></div>
+      <div class="fld"><label>每人炸弹 (0–9)</label><input type="number" id="cfgBombs" min="0" max="9" value="1"></div>
+      <div class="fld"><label>AI 速度 (1–10)</label><input type="number" id="cfgSpeed" min="1" max="10" value="6"></div>
+    </div>
+    <div class="pblock blue">
+      <div class="pt">蓝方（先手）</div>
+      <div class="prow">
+        <select id="cfgBlueKind">
+          <option value="human">人类</option>
+          <option value="weak">弱 AI（原版启发式）</option>
+          <option value="strong">强 AI（概率引擎）</option>
+          <option value="plugin">自定义插件 (JS)</option>
+        </select>
+        <button id="btnSampleBlue" title="下载示例插件">示例</button>
+      </div>
+      <div class="prow">
+        <input type="file" id="cfgBlueFile" accept=".js,.txt" hidden>
+        <div class="pname" id="cfgBlueFileName">未加载插件</div>
+      </div>
+    </div>
+    <div class="pblock red">
+      <div class="pt">红方</div>
+      <div class="prow">
+        <select id="cfgRedKind">
+          <option value="human">人类</option>
+          <option value="weak">弱 AI（原版启发式）</option>
+          <option value="strong" selected>强 AI（概率引擎）</option>
+          <option value="plugin">自定义插件 (JS)</option>
+        </select>
+        <button id="btnSampleRed" title="下载示例插件">示例</button>
+      </div>
+      <div class="prow">
+        <input type="file" id="cfgRedFile" accept=".js,.txt" hidden>
+        <div class="pname" id="cfgRedFileName">未加载插件</div>
+      </div>
+    </div>
+    <div class="plugin-help">
+      自定义插件：一个 JS 文件，定义全局函数 <code>makeDecision(view)</code>，返回
+      <code>{type:'open', x, y}</code> 或 <code>{type:'bomb', x, y}</code>（或 null 随机走子）。<br>
+      view 字段：<code>width height score oppScore mineCount remainMines bombs canBomb bombRadiusH bombRadiusV turn</code>
+      及 <code>cellAt(x,y)</code>（-2 未翻开 / -1 已翻开雷 / 0–8 已翻开数字）。点“示例”下载示例源码。
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button id="btnNewCancel">取消</button>
+    <button class="primary" id="btnNewOk">开始</button>
+  </div>
+</dialog>
+
+<dialog id="dlgResult">
+  <div class="dlg-head"><h2>对局结束</h2></div>
+  <div class="dlg-body">
+    <div id="resultBanner">—</div>
+    <div id="resultStats"></div>
+  </div>
+  <div class="dlg-foot">
+    <button id="btnResClose">关闭</button>
+    <button class="primary" id="btnResAgain">再来一局</button>
+  </div>
+</dialog>
+
+<div id="toast"></div>
+
+<script src="js/core.js"></script>
+<script src="js/ai-weak.js"></script>
+<script src="js/ai-strong.js"></script>
+<script src="js/ui.js"></script>
