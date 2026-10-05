@@ -9,7 +9,7 @@ function wantBomb(view) {
   const M = view.mineCount, total = view.width * view.height;
   const wish = Math.floor(M / total * (2 * view.bombRadiusH + 1) * (2 * view.bombRadiusV + 1));
   const win = Math.floor(M / 2) + 1;
-  if (Math.abs(view.score - view.oppScore) > wish && Math.random() < 0.5) return true;
+  if (Math.abs(view.score - view.oppScore) > wish && randInt(2) === 0) return true;
   if (win - view.score < wish) return true;
   if (win - view.oppScore < wish) return true;
   return false;
@@ -24,7 +24,7 @@ function bombCenterByHidden(view) {
     for (let dy = 0; dy < ys; dy++) for (let dx = 0; dx < xs; dx++) {
       if (view.cellAt(sx + dx, sy + dy) === -2) c++;
     }
-    if (c > best || (c === best && c > 0 && Math.random() < 0.5)) { best = c; bx = sx; by = sy; }
+    if (c > best || (c === best && c > 0 && randInt(2) === 0)) { best = c; bx = sx; by = sy; }
   }
   if (best <= 0) return null;
   return { type: 'bomb', x: bx + (xs >> 1), y: by + (ys >> 1) };
@@ -85,12 +85,17 @@ function weakDecide(view) {
   const hidden = [];
   for (let i = 0; i < total; i++) if (cells[i] === 0) hidden.push(i);
   if (hidden.length === 0) return null;
-  const randTie = i => Math.random() < 1 / (biside[i] ? 2 : 3);
+  const interior = hidden.filter(i => {
+    const x = i % w, y = (i / w) | 0;
+    return x > 0 && x < w - 1 && y > 0 && y < h - 1;
+  });
+  const openCandidates = interior.length ? interior : hidden;
+  const randTie = i => randInt(biside[i] ? 2 : 3) === 0;
   // 0. 确定的雷
   for (const i of hidden) if (val[i] === 100) return { type: 'open', x: i % w, y: (i / w) | 0 };
   // 1. 局部极大 + 最优
   let maxP = -1, nCell = -1, blockMax = -1, blockPos = -1;
-  for (const i of hidden) {
+  for (const i of openCandidates) {
     let isMax = true;
     {
       const n = nb.NEICnt[i];
@@ -105,7 +110,7 @@ function weakDecide(view) {
   }
   if (blockMax > 0.5) nCell = blockPos;
   // 2. 无信息 → 随机
-  if (nCell < 0 || Math.max(maxP, blockMax) < 0) nCell = hidden[randInt(hidden.length)];
+  if (nCell < 0 || Math.max(maxP, blockMax) < 0) nCell = openCandidates[randInt(openCandidates.length)];
   // 3. 炸弹策略
   if (wantBomb(view)) { const b = bombCenterByHidden(view); if (b) return b; }
   return { type: 'open', x: nCell % w, y: (nCell / w) | 0 };

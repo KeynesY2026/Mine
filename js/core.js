@@ -1,12 +1,30 @@
 /* 雷暴 MineStorm — core: 工具函数 + 雷图生成 + Game 规则类 (不依赖 DOM)
    加载顺序: 第一个 (index.html)。导出: window.MineCore { clamp, randInt, neighbours, eachNei, makeMap, computeMineCount, Game }
-   随后 js/ai-weak.js / js/ai-strong.js 会把 weakDecide / strongDecide / computeProbabilities 挂回 MineCore */
+   对局选中的 AI 插件会按需从 plugin/ 加载，并使用此处导出的基础函数 */
 "use strict";
 const MineCore = (() => {
 
 /* ---------------- 工具 ---------------- */
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
-const randInt = n => (Math.random() * n) | 0;
+const RANDOM_RANGE = 0x100000000;
+function randomUint32() {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+    throw new Error('Secure randomness requires Web Crypto (crypto.getRandomValues).');
+  }
+  const value = new Uint32Array(1);
+  cryptoApi.getRandomValues(value);
+  return value[0];
+}
+function randInt(n) {
+  if (!Number.isSafeInteger(n) || n <= 0 || n > RANDOM_RANGE) {
+    throw new RangeError('randInt upper bound must be an integer from 1 to 2^32.');
+  }
+  const limit = Math.floor(RANDOM_RANGE / n) * n;
+  let value;
+  do { value = randomUint32(); } while (value >= limit);
+  return value % n;
+}
 
 // 邻居表缓存
 const NEICACHE = new Map();
@@ -35,24 +53,38 @@ function eachNei(nb, i, fn) {
   for (let k = 0; k < n; k++) fn(nb.NEI[i * 8 + k]);
 }
 
-/* ---------------- 雷图生成 (移植 MakeMap 聚集公式) ----------------
-   每个候选位: 若 (1+邻雷)/(1+邻格) <= 平均密度, 或 rand<0.1, 或连续21次未落 → 落雷 */
+/* ---------------- 雷图生成：安全随机、尽量均匀铺开 ----------------
+   每次放在距离已有地雷最远的候选格；距离并列时用安全随机数打破平局。 */
 function makeMap(w, h, count) {
   const total = w * h;
   const map = new Uint8Array(total);
-  if (count <= 0) return map;
-  const nb = neighbours(w, h);
-  const avg = count / total;
-  let c = count, maxSkipRound = 0;
-  while (c > 0) {
-    const pos = randInt(total);
-    if (!map[pos]) {
-      let nmc = 1, tcc = 1;
-      eachNei(nb, pos, j => { tcc++; if (map[j]) nmc++; });
-      if (nmc / tcc <= avg || Math.random() < 0.1 || maxSkipRound < 0) {
-        map[pos] = 1; c--; maxSkipRound = 20;
+  const mineTotal = Math.min(total, Math.max(0, Math.trunc(count)));
+  if (mineTotal === 0) return map;
+
+  const nearestMineDistance = new Float64Array(total);
+  nearestMineDistance.fill(Infinity);
+  for (let placed = 0; placed < mineTotal; placed++) {
+    let farthest = -1;
+    const candidates = [];
+    for (let i = 0; i < total; i++) {
+      if (map[i]) continue;
+      const distance = nearestMineDistance[i];
+      if (distance > farthest) {
+        farthest = distance;
+        candidates.length = 0;
+        candidates.push(i);
+      } else if (distance === farthest) {
+        candidates.push(i);
       }
-      maxSkipRound--;
+    }
+
+    const pos = candidates[randInt(candidates.length)];
+    map[pos] = 1;
+    const px = pos % w, py = Math.floor(pos / w);
+    for (let i = 0; i < total; i++) {
+      const dx = i % w - px, dy = Math.floor(i / w) - py;
+      const distance = dx * dx + dy * dy;
+      if (distance < nearestMineDistance[i]) nearestMineDistance[i] = distance;
     }
   }
   return map;
@@ -72,7 +104,9 @@ class Game {
     this.mineCount = cfg.mineCount;
     this.bombRadiusH = Math.floor(this.w / 7);
     this.bombRadiusV = Math.floor(this.h / 7);
-    this.bombMax = cfg.bombCount;
+    const requestedBombCount = cfg.bombCount === '' || cfg.bombCount == null ? NaN : Number(cfg.bombCount);
+    this.bombMax = Number.isFinite(requestedBombCount) ? clamp(Math.trunc(requestedBombCount), 0, 999) : 1;
+    this.disableAiBombs = !!cfg.disableAiBombs;
     this.nb = neighbours(this.w, this.h);
     this._subs = [];
     this.reset();
@@ -104,8 +138,8 @@ class Game {
   get remainMines() { return this.mineCount - this.scoreTotal; }
   get winNeed() { return Math.floor(this.mineCount / 2) + 1; }
   isPlayerTurn(p) { return this.turn === p && !this.over; }
-  canBomb(p) {
-    if (this.over) return false;
+  canBomb(p, { ai = false } = {}) {
+    if (this.over || (ai && this.disableAiBombs)) return false;
     const me = this.scores[p], opp = this.scores[p === 'blue' ? 'red' : 'blue'];
     return me < opp && this.bombs[p] > 0;
   }
@@ -178,9 +212,13 @@ class Game {
     }
     return cells;
   }
-  bomb(x, y) {
+  bomb(x, y, { ai = false } = {}) {
     if (this.over) return { ok: false };
-    if (!this.canBomb(this.turn)) { this.bombMode = false; return { ok: false, why: 'cannot' }; }
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= this.w || y >= this.h) {
+      this.bombMode = false;
+      return { ok: false, why: 'invalid-target' };
+    }
+    if (!this.canBomb(this.turn, { ai })) { this.bombMode = false; return { ok: false, why: 'cannot' }; }
     const who = this.turn === 'blue' ? 1 : 2;
     const me = this.turn;
     this.bombs[me]--; this.rounds[me]++;
@@ -196,8 +234,29 @@ class Game {
     this._emit(this.lastMove);
     return { ok: true, kind: 'bomb', x, y, mines: mineHit, cells };
   }
+  bombBest() {
+    if (!this.canBomb(this.turn, { ai: true })) return { ok: false, why: 'cannot' };
+    let best = null;
+    let bestMines = -1;
+    let bestHidden = 0;
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      let mines = 0;
+      let hidden = 0;
+      for (const i of this.bombAreaCells(x, y)) {
+        if (this.revealed[i]) continue;
+        hidden++;
+        if (this.mines[i]) mines++;
+      }
+      if (mines > bestMines) {
+        bestMines = mines;
+        bestHidden = hidden;
+        best = { x, y };
+      }
+    }
+    return best && bestHidden > 0 ? this.bomb(best.x, best.y, { ai: true }) : { ok: false, why: 'no-target' };
+  }
   // AI / 插件只读视图 (镜像 IChess, 额外 oppScore/bombs/turn)
-  view(forPlayer) {
+  view(forPlayer, { ai = false } = {}) {
     const p = forPlayer || this.turn;
     const opp = p === 'blue' ? 'red' : 'blue';
     const self = this;
@@ -210,7 +269,7 @@ class Game {
       },
       score: this.scores[p], oppScore: this.scores[opp],
       mineCount: this.mineCount, remainMines: this.remainMines,
-      bombs: this.bombs[p], canBomb: this.canBomb(p),
+      bombs: this.bombs[p], canBomb: this.canBomb(p, { ai }),
       bombRadiusH: this.bombRadiusH, bombRadiusV: this.bombRadiusV, turn: p,
     };
   }

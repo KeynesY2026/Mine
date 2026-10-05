@@ -284,13 +284,19 @@ function strongDecide(view) {
   const prob = computeProbabilities(view);
   const w = view.width, h = view.height, total = w * h;
   const bw = view.bombRadiusH, bv = view.bombRadiusV;
+  let hasInteriorHidden = false;
+  for (let y = 1; y < h - 1 && !hasInteriorHidden; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      if (view.cellAt(x, y) === -2) { hasInteriorHidden = true; break; }
+    }
+  }
   const oppScore = view.mineCount - view.remainMines - view.score;
   const winNeed = Math.floor(view.mineCount / 2) + 1;
   const wish = Math.floor(view.mineCount / total * (2 * bw + 1) * (2 * bv + 1));
   // 炸弹决策: 落后且期望收益大, 或接近胜利线
   if (view.canBomb) {
     const scoreDiff = Math.abs(view.score - oppScore);
-    if ((scoreDiff > wish && Math.random() < 0.5) ||
+    if ((scoreDiff > wish && randInt(2) === 0) ||
         (winNeed - view.score < wish) || (winNeed - oppScore < wish && oppScore >= view.score)) {
       // 选隐藏格最多的矩形
       let bestCnt = -1, bx = 0, by = 0;
@@ -309,11 +315,17 @@ function strongDecide(view) {
   for (const [i, p] of prob) {
     const x = i % w, y = (i / w) | 0;
     if (view.cellAt(x, y) !== -2) continue;
+    const isEdge = x === 0 || y === 0 || x === w - 1 || y === h - 1;
+    if (hasInteriorHidden && isEdge && p < 1 - 1e-12) continue;
     if (p > bestP) { bestP = p; best = i; }
   }
   if (best >= 0) return { type: 'open', x: best % w, y: (best / w) | 0 };
   const hidden = [];
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (view.cellAt(x, y) === -2) hidden.push(x + y * w);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (view.cellAt(x, y) !== -2) continue;
+    if (hasInteriorHidden && (x === 0 || y === 0 || x === w - 1 || y === h - 1)) continue;
+    hidden.push(x + y * w);
+  }
   if (hidden.length === 0) return null;
   const i = hidden[randInt(hidden.length)];
   return { type: 'open', x: i % w, y: (i / w) | 0 };
