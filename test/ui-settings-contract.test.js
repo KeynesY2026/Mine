@@ -34,10 +34,10 @@ test('AI receives an AI-filtered public view and enhanced dispatch is explicit',
   assert.match(core, /disableAiBombs/);
 });
 
-test('game-over notification is brief and leaves the board available for review', () => {
+test('game-over announces the winning side and leaves the board available for review', () => {
   const onGameOver = ui.match(/function onGameOver\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 
-  assert.match(onGameOver, /toast\(result,\s*false,\s*false,\s*2000\)/);
+  assert.match(onGameOver, /victoryCelebration\.start\(label\(game\.winner\) \+ '获胜！'\)/);
   assert.doesNotMatch(onGameOver, /showModal|fillResult|dlgResult/);
   assert.doesNotMatch(html, /id="boardOverlay"|id="dlgResult"/);
 });

@@ -168,7 +168,9 @@ button.toggle.bomb.on { background: #33151c; border-color: var(--red); color: va
 footer { padding: 8px 14px; font-size: 11px; color: #55607a; border-top: 1px solid var(--line); flex: 0 0 auto; }
 
 /* ---------- 对话框 ---------- */
-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text);
+dialog { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0;
+  max-height: 92vh; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text);
   padding: 0; width: min(560px, 94vw); box-shadow: 0 24px 80px #000a; }
 dialog::backdrop { background: #06081099; backdrop-filter: blur(3px); }
 .dlg-head { padding: 16px 20px 10px; display: flex; align-items: baseline; gap: 10px; }
@@ -197,6 +199,16 @@ dialog::backdrop { background: #06081099; backdrop-filter: blur(3px); }
 .plugin-help { font-size: 11px; color: var(--dim); line-height: 1.55; background: #00000033;
   border-radius: 6px; padding: 8px 10px; }
 .plugin-help code { color: var(--gold); font-family: Consolas, monospace; }
+/* ---------- victory celebration ---------- */
+#victoryFireworks { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 1000;
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .18s ease; }
+#victoryFireworks.show { opacity: 1; visibility: visible; }
+#winnerMessage { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(.8);
+  z-index: 1001; color: #fff5c4; font-size: clamp(30px, 7vw, 68px); font-weight: 900;
+  white-space: nowrap; text-shadow: 0 3px 0 #9a4b00, 0 0 18px #ffc94d, 0 0 42px #ff6b35;
+  opacity: 0; visibility: hidden; pointer-events: none; transition: opacity .2s ease, transform .2s ease; }
+#winnerMessage.show { opacity: 1; visibility: visible; transform: translate(-50%, -50%) scale(1); }
+
 /* ---------- toast ---------- */
 #toast { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%) translateY(20px);
   background: #232c40ee; border: 1px solid var(--line); border-radius: 8px; padding: 9px 16px;

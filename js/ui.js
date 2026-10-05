@@ -10,6 +10,7 @@ const decisionGuard = MineAIDecision;
 const gameSettings = MineGameSettings;
 const keySequence = MineKeySequence.create('keynesy', 1500);
 const $ = id => document.getElementById(id);
+const victoryCelebration = MineVictoryCelebration.create($('victoryFireworks'), $('winnerMessage'));
 const label = p => (p === 'blue' ? '蓝方' : '红方');
 const other = p => (p === 'blue' ? 'red' : 'blue');
 
@@ -332,8 +333,8 @@ function onGameOver() {
   else if (game.winner === 'red') session.red++;
   else session.draw++;
   updateHUD();
-  const result = game.winner === 'draw' ? '本局平局' : label(game.winner) + '获胜';
-  toast(result, false, false, 2000);
+  if (game.winner === 'draw') toast('本局平局', false, false, 2000);
+  else victoryCelebration.start(label(game.winner) + '获胜！');
 }
 
 /* ---------------- 新对局 / 设置 ---------------- */
