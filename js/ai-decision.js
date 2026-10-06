@@ -17,12 +17,26 @@
     const fallback = suppliedFallback?.type === 'open' && isHidden(suppliedFallback.x, suppliedFallback.y)
       ? { type: 'open', x: suppliedFallback.x, y: suppliedFallback.y }
       : legalOpens[0];
+    const isLegalAction = action => {
+      if (action?.type === 'open' && isHidden(action.x, action.y)) return true;
+      if (action?.type === 'bomb' && isHidden(action.x, action.y) && game.canBomb(player, { ai: true })) return true;
+      return false;
+    };
 
     if (decision?.type === 'open' && isHidden(decision.x, decision.y)) {
       return { action: { type: 'open', x: decision.x, y: decision.y }, invalid: false, noMoves: false };
     }
-    if (decision?.type === 'bomb' && isCell(decision.x, decision.y) && game.canBomb(player, { ai: true })) {
+    if (decision?.type === 'bomb' && isHidden(decision.x, decision.y) && game.canBomb(player, { ai: true })) {
       return { action: { type: 'bomb', x: decision.x, y: decision.y }, invalid: false, noMoves: false };
+    }
+    if (decision?.type === 'bomb-auto' && options.pluginId === 'constraint-probability' &&
+        options.enhancedAI === true && game.canBomb(player, { ai: true }) && isLegalAction(decision.fallback)) {
+      return {
+        action: { type: 'bomb-auto' },
+        fallbackAction: { type: decision.fallback.type, x: decision.fallback.x, y: decision.fallback.y },
+        invalid: false,
+        noMoves: false,
+      };
     }
     return { action: fallback, invalid: true, noMoves: false };
   }

@@ -1,42 +1,43 @@
 # MineStorm Shared AI Planner Implementation Plan
 
-> **For agentic workers:** This plan is being executed inline in the current session. Follow each task in order, write tests first, prove each test fails for the intended reason, implement the smallest change, then prove it passes. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** This plan is being executed inline in the current session. Tasks 1–7 record the completed shared-planner baseline. The approved design update supersedes their old “remove enhanced AI/BombBest” decisions; execute Tasks 8 onward in order, use TDD, prove each RED for the intended reason, and run each focused GREEN before continuing. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace duplicated AI probability logic with one public-information planner, give Invincible the approved frontier/free and late-game strategy, make bomb blasts fixed `5×5`, and remove AI access to hidden-mine bomb targeting.
+**Goal:** Apply the approved probability and bomb-policy update to the shared MineStorm AI, restore opt-in engine-side Invincible BombBest targeting, enforce hidden-cell bomb centers for every player, and add the human airplane bomb cursor.
 
-**Architecture:** Add `js/ai-planner.js` to build an immutable analysis snapshot solely from a materialized public view; all three existing lazy-loaded plugins consume that snapshot. Keep Simple and Medium's current difficulty decision rules while changing only their probability source; implement the new candidate, endgame and expected-bomb-yield rules for Invincible. The UI caches one analysis per public-board revision and uses it for AI and hints; the core applies fixed `5×5` blast geometry to both human and AI bombs.
+**Architecture:** Keep the immutable public-information planner as the default AI input and change its `freeMineProbability` estimate to the approved sum-of-component-minimum formula. Simple and Medium use their specified bomb timing/target functions; Invincible may request a hidden-state BombBest only through a default-on UI option and a guarded core path, while its plugin still receives no Game or mine-map reference. Enforce center legality in `Game.bomb()` and the AI decision guard; render the human bomb cursor as a one-cell SVG overlay while preserving the clipped `5×5` preview.
 
-**Tech Stack:** Static HTML/CSS/vanilla JavaScript; Node.js built-in `node:test`; no new dependencies.
+**Tech Stack:** Static HTML/CSS/vanilla JavaScript; Node.js built-in `node:test`; Playwright CLI headed Microsoft Edge for visual smoke checks; no new dependencies.
 
-**Spec:** `docs/superpowers/specs/2026-10-06-minestorm-shared-ai-planner-design.md`
+**Spec:** `docs/superpowers/specs/2026-10-06-minestorm-shared-ai-planner-design.md` and `docs/superpowers/specs/2026-10-06-minestorm-ai-bomb-policy-design-update.md`
 
 ## Global Constraints
 
-- “exact” means exact marginal probabilities under equally weighted mine configurations satisfying public clues and remaining-mine count; it is not calibrated to `makeMap`'s farthest-distance generation.
-- AI, hints, bomb selection, and invalid-action fallback use public information only; no AI path reads `Game.mines` or calls `Game.bombBest()`.
-- The blast is a centered `5×5` square (horizontal and vertical radius 2), clipped at board edges; board dimensions remain configurable and do not change the blast size.
-- Keep the plugin contract `makeDecision(view)` and lazy-load only the selected AI; add `view.analysis` without giving plugins a `Game` reference or mutable hidden-state closure.
-- Preserve Simple and Medium decision rules; only their probability source changes to the shared analysis. Invincible follows spec sections 5–6.
-- Preserve the mine-map generator and secure RNG; add no dependency or persisted AI state.
-- At an approximate analysis quality, expose no certain mines/safes even when an estimate is 0 or 1.
+- `freeMineProbability = clamp((remainMines - sum(minMines(component) for each frontier component)) / freeCells.length, 0, 1)`; use `null` when there are no `freeCells`. This user-defined estimate is not an equal-weight global marginal.
+- Ordinary AI analysis, normal coordinate choices, hints, and fallback decisions use only public information; plugins never receive `Game`, `Game.mines`, or a hidden-cell query API.
+- The only hidden-map decision path is an explicitly authorized Invincible `{type:'bomb-auto'}` request resolved in the engine when the default-on enhanced option is enabled. If disabled, Invincible retains coordinate-only public strategy; `cfgDisableAiBombs` disables both AI bomb paths.
+- Every bomb center, human or AI, coordinate or automatic, must be an unrevealed cell. Rejection must not consume a bomb or reveal cells. AI invalid decisions reuse the existing “AI 走昏招了！” notification and fallback.
+- The blast is a centered `5×5` square (horizontal and vertical radius 2), clipped at board edges; do not change board dimensions, `makeMap`, or secure RNG.
+- Simple bombs whenever it is trailing and `canBomb`; choose a legal hidden center maximizing hidden cells in the clipped blast. Medium bombs only when trailing by at least 5; choose a legal hidden center maximizing summed hidden-cell probabilities. Preserve their ordinary open-move rules.
+- Invincible may use BombBest for an immediate win; otherwise automatic targeting requires trailing by at least 3 and must not increase `knownComponentCount`; choose the most actual hits among qualifying hidden centers, else use its public coordinate policy.
+- Bomb-mode human cursor is an airplane SVG centered on the hovered target cell and limited to one cell; keep the `5×5` blast preview. User confirmed the probability-hint/cheat report appears fixed; do not modify that path.
+- Keep plugin contract `makeDecision(view)`, lazy-load only the selected AI, preserve immutable shared analysis, and add no dependency or persisted AI state. At approximate quality expose no certain mines/safes.
 - Run focused `node --test` files after each task and `node --test test/*.test.js` at the end.
 
 ## File Map
 
-- `js/ai-planner.js` (new): public-view materialization helpers, exact constraint enumeration/global conditioning, explicit approximate fallback, immutable analysis API.
-- `js/core.js`: fixed bomb radii, public view fields, `bombAreaCells`; retain the legacy `bombBest()` only until the AI/UI cutover task removes it.
-- `js/ai-decision.js`: public action validation and policy-based open fallback; reject coordinate-free `bomb-auto`.
-- `plugin/ai-heuristic.js`: preserve Simple's selection rules while consuming `view.analysis`; remove its local probability propagation.
-- `plugin/ai-global-probability.js`: preserve Medium's selection rules while consuming `view.analysis`; remove the duplicate solver and `MineCore.computeProbabilities` side effect.
-- `plugin/ai-constraint-probability.js`: implement Invincible's exact-certain, frontier/free, endgame and public expected-yield bomb policy using shared analysis.
-- `plugin/ai-config.js`: correct descriptions to match behavior and remove “low-risk” mischaracterization for Invincible.
-- `js/ui.js`: materialize immutable public views, maintain board-revision analysis cache, share analysis with AI/hints, validate async decisions against current state, remove `bomb-auto` dispatch.
-- `index.html`: load the planner before UI/plugins, remove enhanced-AI control and obsolete contract text, describe fixed 5×5 blasts.
-- `test/ai-planner.test.js` (new): planner exactness, classification, fallback, immutability and input-validation tests.
-- `test/bomb-area.test.js`: fixed blast geometry across board sizes and edge clipping; remove tests that endorse the hidden-state AI oracle.
-- `test/strong-plugin.test.js` and `test/ai-edge-avoidance.test.js`: policy behavior tests against explicit shared analysis fixtures.
-- `test/ai-decision.test.js`: coordinate bomb validation, no-hidden fallback and recovery policy.
-- `test/ui-settings-contract.test.js`, `test/plugin-registry.test.js`: script order, removed enhanced-AI setting, lazy plugin contract, and updated descriptions.
+- `js/ai-planner.js`: update `freeMineProbability`; expose bomb-center candidates only where the center itself is unrevealed; retain immutable public analysis and ordinary expected yields.
+- `js/core.js`: enforce hidden-center legality; restore guarded `Game.bombBest()` for automatic targeting only; calculate `knownComponentCount` and preserve fixed blast geometry.
+- `js/ai-decision.js`: accept authorized Invincible `bomb-auto` plus validated coordinate fallback; reject out-of-bounds or revealed bomb centers.
+- `plugin/ai-heuristic.js`: Simple `canBomb` timing and max-hidden-cell bomb center; preserve its ordinary move policy.
+- `plugin/ai-global-probability.js`: Medium ≥5-point deficit gate and max summed-probability legal center; preserve ordinary move policy.
+- `plugin/ai-constraint-probability.js`: use `freeMineProbability`; request auto-target only under the approved Invincible gate and retain coordinate fallback.
+- `plugin/ai-config.js`: describe enhanced BombBest behavior and the public-only ordinary policy accurately.
+- `js/ui.js`: restore default-on enhanced setting wiring; revalidate authorization before auto-target; reuse existing invalid-AI warning/fallback; explain illegal human center; render hovered one-cell airplane icon.
+- `index.html`, `css/style.css`: restore enhanced-AI checkbox/help and define the one-cell airplane cursor without changing the fixed blast preview.
+- `test/ai-planner.test.js`: minimum frontier-mine formula, no-free/cap/contradiction behavior, and hidden-center candidate classification.
+- `test/strong-plugin.test.js`, `test/ai-edge-avoidance.test.js`: Simple/Medium bomb timing and target objectives; Invincible automatic versus coordinate policy.
+- `test/bomb-area.test.js`, `test/ai-decision.test.js`: global center validation, no-spend/no-reveal rejection, and existing AI invalid-move behavior.
+- `test/ui-settings-contract.test.js`, `test/plugin-registry.test.js`: default-on option, authorized auto dispatch/fallback, public plugin boundary, and cursor/help contract.
 
 ---
 
@@ -314,3 +315,210 @@ Expected: all tests pass; no AI path uses the hidden-state bomb oracle; no plugi
 - [x] **Step 5: Review final diff against the approved spec**
 
 Check each spec section 2–10 against the changed modules and tests. Confirm fixed `5×5` across dimensions, exact-vs-approximate semantics, Simple/Medium rule preservation, Invincible strategy order, stale async protection, and no unrelated map-generation or RNG changes.
+
+---
+
+## Approved policy-update execution tasks
+
+Tasks 1–7 above describe the completed shared-planner baseline. The approved addendum supersedes their old removal of the enhanced option and `Game.bombBest()`; do not revert the shared planner, immutable public view, cache, or async safeguards while applying these tasks.
+
+### Task 8: Implement the approved free-cell probability estimate
+
+**Files:**
+- Modify: `js/ai-planner.js`
+- Modify: `test/ai-planner.test.js`
+
+**Interfaces:** Keep `MineAIPlanner.analyze(publicView, options = {})` and `analysis.freeMineProbability: number | null`. For exact per-component enumeration, `minMines(component)` is the first nonzero total-mine stratum in that component’s histogram. Exact quality uses `clamp((remainMines - sum(minMines)) / freeCells.length, 0, 1)`; no free cells returns `null`. If a component cannot be enumerated exactly, preserve approximate quality/no-certainty behavior and the existing uniform fallback estimate.
+
+- [x] **Step 1: Add a failing disconnected-component regression**
+
+In the existing `separate frontier clusters combine with free-cell combinations before marginals are computed` test, keep the 15×1 fixture and exact marginal assertions. Change the expected `freeMineProbability` from `0.25` to `0.5`: the two disconnected frontier components each require at least one mine, leaving `(3 - 2) / 2 = 0.5` by the user’s formula.
+
+- [x] **Step 2: Run the planner test and verify RED**
+
+Run: `node --test test/ai-planner.test.js`
+Expected: the component fixture fails only at `freeMineProbability` (`0.25 !== 0.5`); exact per-cell marginals remain unchanged.
+
+- [x] **Step 3: Track each exact frontier component’s minimum mine count**
+
+At component enumeration, find the least index `k` with a nonzero assignment histogram and add `k` to `minFrontierMines`. Pass that total into analysis construction. Set `freeMineProbability` to `null` for zero free cells; otherwise clamp `(state.remainMines - minFrontierMines) / free.length`. Add regressions where locally solvable components with an impossible global total clamp below zero to `0`, and where a valid exact global layout leaves more free mines than free cells to clamp above one to `1`. If all local components were enumerated but the global mine total is contradictory, retain this clamped user-defined scalar while keeping `quality:'approximate'` and certainty arrays empty. If component enumeration hit the cap or local constraints cannot be solved, keep the existing uniform approximate estimate. Do not change per-cell equal-weight marginals or certainty rules.
+
+- [x] **Step 4: Verify planner RED-to-GREEN and edge cases**
+
+Run: `node --test test/ai-planner.test.js`.
+Expected: exact marginal oracle tests still pass; disconnected-component free estimate is `0.5`; no-free remains `null`; approximate/capped analysis exposes no certainties.
+
+### Task 9: Apply the Simple and Medium bomb policies
+
+**Files:**
+- Modify: `plugin/ai-heuristic.js`
+- Modify: `plugin/ai-global-probability.js`
+- Modify: `test/ai-edge-avoidance.test.js`
+- Modify: `test/strong-plugin.test.js`
+
+**Interfaces:** Keep plugin IDs and `makeDecision(view)`. Both policies consume only `view.analysis.bombCenters`, whose entries already contain `{x,y,expectedMines,hiddenCount}`. Candidate centers must themselves be unrevealed (enforced in Task 10 and analysis output in Task 10). Simple bombs only while behind; Medium bombs only when `view.oppScore - view.score >= 5`.
+
+- [x] **Step 1: Add behavior tests before changing either plugin**
+
+Add tests asserting Simple returns a bomb when `view.canBomb` is true and it is trailing, chooses the candidate with greatest `hiddenCount` even when another center has a larger `expectedMines`, and does not bomb when tied/ahead. Add Medium tests asserting a 4-point deficit returns a normal open, a 5-point deficit permits bombing, and its chosen center has the greatest `expectedMines`. Keep tests for their existing ordinary move selection unchanged.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+Run: `node --test test/ai-edge-avoidance.test.js`.
+Expected: old Simple max-expected-yield objective and old Medium threshold fail the new assertions.
+
+- [x] **Step 3: Update only bomb timing and target scoring**
+
+In Simple, replace `wantBomb(view)`’s score/win heuristics with `!!view.canBomb && view.bombs > 0 && view.score < view.oppScore`; choose max `hiddenCount`, preserving existing random tie selection. In Medium, request a bomb only when `view.canBomb && view.bombs > 0 && view.oppScore - view.score >= 5`; maximize `expectedMines`, preserving existing tie order. Leave all non-bomb open-move ordering untouched.
+
+- [x] **Step 4: Verify policy tests GREEN**
+
+Run: `node --test test/ai-edge-avoidance.test.js test/strong-plugin.test.js`.
+Expected: new bomb policy tests pass and existing Simple/Medium ordinary move regressions remain green.
+
+### Task 10: Enforce hidden bomb centers in analysis, core, and AI validation
+
+**Files:**
+- Modify: `js/ai-planner.js`
+- Modify: `js/core.js`
+- Modify: `js/ai-decision.js`
+- Modify: `js/ui.js`
+- Modify: `test/ai-planner.test.js`
+- Modify: `test/bomb-area.test.js`
+- Modify: `test/ai-decision.test.js`
+- Modify: `test/ui-settings-contract.test.js`
+
+**Interfaces:** `Game.bomb(x, y, {ai = false} = {})` is the final global rule boundary. `MineAIDecision.resolve(game, player, decision, {fallbackDecision})` accepts a bomb only when its integer in-range center satisfies `!game.revealed[y * game.w + x]`. An invalid AI action keeps the existing “AI 走昏招了！” warning and public fallback.
+
+- [x] **Step 1: Add core and guard tests**
+
+In `test/bomb-area.test.js`, make a bomb-eligible fixture with one revealed center and several hidden neighbors; assert `bomb(knownX,knownY)` returns `{ok:false,why:'center-not-hidden'}`, bomb inventory and `hiddenCount` are unchanged, and the bomb action reveals nothing. Repeat with `{ai:true}`. In `test/ai-decision.test.js`, assert a bomb on a revealed center resolves as `invalid:true` to the supplied legal fallback; keep the existing out-of-range `昏招` contract assertion.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+Run: `node --test test/bomb-area.test.js test/ai-decision.test.js`.
+Expected: core currently accepts a revealed bomb center and the decision guard accepts an in-range revealed bomb center.
+
+- [x] **Step 3: Reject non-hidden centers before bomb consumption**
+
+In `Game.bomb`, after coordinate bounds validation and before permission, inventory, score, or reveal mutation, return `{ok:false,why:'center-not-hidden'}` if `this.revealed[y * this.w + x]` is true. In `MineAIDecision.resolve`, change the `bomb` branch to use the existing `isHidden(x,y)` predicate. In `createAnalysis`, add a `bombCenters` entry only when its center cell is `-2`, in addition to requiring a nonempty hidden blast area.
+
+- [x] **Step 4: Reuse existing human and AI feedback paths**
+
+In `onCellClick`, if `game.bomb(x,y)` returns `why === 'center-not-hidden'`, show `炸弹中心必须选择未翻开的格子` and leave the bomb/inventory/revealed state unchanged. Do not add an AI warning implementation: `scheduleAI()` already warns on `resolved.invalid`, and `applyDecision()` already warns if core rejects an action before recovering via the public fallback.
+
+- [x] **Step 5: Verify all center-legality tests GREEN**
+
+Run: `node --test test/ai-planner.test.js test/bomb-area.test.js test/ai-decision.test.js test/ui-settings-contract.test.js`.
+Expected: human and AI core rejection, resolver rejection, legal-hidden center enumeration, and existing “昏招” warning/fallback tests pass.
+
+### Task 11: Restore guarded Invincible BombBest and opponent-information policy
+
+**Files:**
+- Modify: `js/core.js`
+- Modify: `test/bomb-area.test.js`
+
+**Interfaces:** Restore `Game.bombBest()` as an engine-only automatic action. It checks `canBomb(this.turn,{ai:true})`, enumerates only centers satisfying `!this.revealed[center]`, counts actual mines in each clipped blast, and executes the highest-hit qualifying target through `Game.bomb()`. An immediate-win target bypasses only the known-component filter. Otherwise require `oppScore - score >= 3` and `knownComponentCountAfter <= knownComponentCountBefore`; no eligible target returns `{ok:false,why:'no-target'}` without consuming a bomb. `knownComponentCount` counts 8-neighbor connected components among revealed cells.
+
+- [x] **Step 1: Add tests for gating, winning exception, and information filter**
+
+Construct deterministic boards by setting their mine/revealed arrays in `test/bomb-area.test.js`. Assert: AI bomb disablement returns `why:'cannot'`; all-revealed centers are never selected; an immediate-winning highest-hit center is allowed even if it raises component count; non-winning auto bombs fail when the score deficit is under 3; candidates that increase known components are excluded; among remaining candidates, the highest actual hit count is chosen.
+
+- [x] **Step 2: Run focused core tests and verify RED**
+
+Run: `node --test test/bomb-area.test.js`.
+Expected: `Game.bombBest` was undefined; new tests failed before implementation.
+
+- [x] **Step 3: Implement the guarded engine-only target resolver**
+
+Add a private `knownComponentCount(revealed,w,h)` traversal using 8-neighbor adjacency. Implement `Game.bombBest()` to enumerate unrevealed centers, calculate `mineHits` and post-blast component count, retain immediate-win candidates regardless of component increase, otherwise enforce deficit and information rules, select maximum mine hits with secure `MineCore.randInt` only among equal maxima, then call `this.bomb(x,y,{ai:true})`. Return failure without mutation when no candidate qualifies.
+
+- [x] **Step 4: Verify core target tests GREEN**
+
+Run: `node --test test/bomb-area.test.js`.
+Expected: center legality, AI permission, immediate-win exception, late deficit, component filtering, and actual-hit maximum all pass.
+
+### Task 12: Re-enable enhanced AI and route authorized automatic requests
+
+**Files:**
+- Modify: `index.html`
+- Modify: `plugin/ai-constraint-probability.js`
+- Modify: `js/ai-decision.js`
+- Modify: `js/ui.js`
+- Modify: `plugin/ai-config.js`
+- Modify: `test/ai-decision.test.js`
+- Modify: `test/strong-plugin.test.js`
+- Modify: `test/ui-settings-contract.test.js`
+- Modify: `test/plugin-registry.test.js`
+
+**Interfaces:** Keep `makeDecision(view)`; add read-only `view.enhancedAI`. When it emits `{type:'bomb-auto',fallback:{type:'open'|'bomb',x,y}}`, the decision guard accepts it only if the caller authorizes the Invincible plugin, the enhanced checkbox is on, `canBomb(player,{ai:true})` is true, and the fallback is a legal coordinate action: open requires an unrevealed in-bounds cell; bomb also requires a hidden center and current AI bomb permission. If plugin fallback is invalid, use the scheduler’s public fallback. Return `{action:{type:'bomb-auto'},fallbackAction,invalid:false,noMoves:false}`. `applyDecision(p,action,fallbackAction)` rechecks plugin ID, current checkbox, turn and bomb permission, calls `game.bombBest()` only if still authorized, and executes the validated fallback if BombBest reports no target. A disabled/stale setting must never execute auto targeting.
+
+- [x] **Step 1: Add failing contract and policy tests**
+
+Test that `cfgEnhancedAI` is present and `checked` in `index.html`; Invincible emits `bomb-auto` only when `view.enhancedAI` is true and the automatic policy qualifies, with a legal coordinate fallback; disabled enhancement preserves coordinate-only bomb policy; other plugins and unauthorized guard calls cannot trigger auto; an auto target with no eligible center applies fallback; `cfgDisableAiBombs` blocks auto.
+
+- [x] **Step 2: Run focused tests and verify RED**
+
+`node --test test/strong-plugin.test.js test/ai-decision.test.js test/ui-settings-contract.test.js` initially confirmed absent `bomb-auto` handling, Invincible auto actions and default enhanced option; a test regex typo was fixed before implementation.
+
+Run: `node --test test/ai-decision.test.js test/strong-plugin.test.js test/ui-settings-contract.test.js test/plugin-registry.test.js`.
+Expected: UI has no enhanced option, guard rejects `bomb-auto`, and Invincible never requests the automatic action.
+
+- [x] **Step 3: Implement default-on UI setting and actor-view flag**
+
+Add `<input type="checkbox" id="cfgEnhancedAI" checked>` beside `cfgDisableAiBombs` in the new-game dialog. Set `view.enhancedAI` from its current checked state in `makeView`; keep it out of core hidden-state data and never pass `game` to plugins. Update visible copy and Invincible config description.
+
+- [x] **Step 4: Add Invincible auto gate and validated fallback**
+
+In `plugin/ai-constraint-probability.js`, keep the public coordinate policy as the fallback. When `view.enhancedAI && view.canBomb`, allow Invincible to request `{type:'bomb-auto',fallback:publicCoordinateAction}`; the engine-side `Game.bombBest()` decides whether an immediate-win or trailing-by-at-least-3 candidate actually qualifies. Otherwise return the normal coordinate/open action. Validate fallback coordinates in the guard; do not let the plugin inspect actual mine positions or known-component counts.
+
+- [x] **Step 5: Resolve and revalidate auto actions in UI**
+
+Authorize `bomb-auto` only when `kind[p] === 'constraint-probability'`, the live checkbox remains checked, and `game.canBomb(p,{ai:true})` is true. Pass the resolved fallback into `applyDecision`; after rechecking game identity/turn/status, call `game.bombBest()`. On `{ok:false}`, resolve and execute the supplied fallback using the existing core path. Keep `cfgDisableAiBombs` authoritative.
+
+- [x] **Step 6: Verify UI/guard/plugin RED-to-GREEN**
+
+Run: `node --test test/ai-decision.test.js test/strong-plugin.test.js test/ui-settings-contract.test.js test/plugin-registry.test.js`.
+Expected: default-on setting, authorized-only auto, stale/disabled denial, coordinate fallback, and current lazy plugin loading all pass.
+
+### Task 13: Add the human airplane bomb cursor
+
+**Files:**
+- Modify: `js/ui.js`
+- Modify: `css/style.css`
+- Modify: `test/ui-settings-contract.test.js`
+
+**Interfaces:** During human `bombMode`, the currently hovered board cell remains `bombPreviewCenter`; its center cell renders one decorative inline-SVG airplane-bombing icon via a pseudo-element. The icon size is bounded by `var(--cs)`, uses `pointer-events:none`, and does not replace or obscure the existing 5×5 blast preview.
+
+- [x] **Step 1: Add a static UI contract test**
+
+Assert CSS has a bomb-mode center-icon rule scoped to `.cell.hidden.bomb-preview-center`, with bounded one-cell sizing and `pointer-events:none`; assert the board retains the existing `.bomb-preview` range class and that the text/help describes the airplane center icon and fixed `5×5` blast.
+
+- [x] **Step 2: Run the contract test and verify RED**
+
+`node --test test/ui-settings-contract.test.js` first failed because CSS still used `cursor: crosshair` and had no inline-SVG airplane rule. After implementation, the same contract passed 9/9.
+
+- [x] **Step 3: Render the airplane icon without intercepting input**
+
+Replace the bomb-mode crosshair with a hidden system cursor over `#board`; add a single-cell `::after` airplane/bomb SVG to the hidden hovered center cell. Preserve pointerenter-driven `bombPreviewCenter`, preview cell classes, normal cursor outside the board, and the existing center click handler.
+
+- [x] **Step 4: Verify the real interaction in headed Edge**
+
+Served `E:/tmp/mine_27b` on port `8765` with explicit working directory and opened `http://127.0.0.1:8765` via `playwright-cli open --browser=msedge --headed`. After 23 public UI clicks, the two-human fixture had Blue 2 : Red 3 and Blue to move. In bomb mode, hovering the hidden `(0,0)` center yielded a 44×44 inline SVG icon on a 44×44 cell, `cursor:none`, `pointer-events:none`, and 9 preview cells at the clipped corner. Clicking a revealed center displayed `炸弹中心必须选择未翻开的格子`, kept bomb mode active and left both bomb inventories at 1/1. Clicking hidden `(0,0)` then succeeded: Blue bombs 0/1, mode exited, and last move displayed `最后: 蓝方 炸弹扫区 · 炸中 2 雷 (0,0)`. Edge console showed only the existing missing `favicon.ico` 404. Closed the browser, stopped server PID 19500, and removed generated `.playwright-cli/` artifacts.
+
+### Task 14: Final regression and source audit
+
+**Files:**
+- Verify all changed files; no additional implementation files expected.
+
+- [x] **Step 1: Run all focused test groups**
+
+`node --test test/ai-planner.test.js test/strong-plugin.test.js test/ai-edge-avoidance.test.js test/ai-decision.test.js test/bomb-area.test.js test/ui-settings-contract.test.js test/plugin-registry.test.js test/ai-public-invariance.test.js` passed 70/70.
+
+- [x] **Step 2: Run the full suite and source audits**
+
+`node --test test/*.test.js` passed 84/84; `git diff --check` passed (Git emitted only LF→CRLF working-copy warnings). `rg -n "Game\.bombBest|bomb-auto|cfgEnhancedAI|computeProbabilities" js plugin index.html` found the engine/UI guard and Invincible route; `computeProbabilities` had no matches. `rg -n "game\.mines|\.mines\[" plugin` had no matches. Diff review confirmed no `makeMap` or RNG changes.
+
+- [x] **Step 3: Review the final diff against both specs**
+
+Reviewed `docs/superpowers/specs/2026-10-06-minestorm-shared-ai-planner-design.md` and its approved override `docs/superpowers/specs/2026-10-06-minestorm-ai-bomb-policy-design-update.md` against implementation and tests. The component-minimum formula/null behavior, Simple/Medium ≥1/≥5 bomb rules, Invincible immediate-win and ≥3 deficit/component gate, enhanced default-on authorization/fallback, hidden-center rule, existing AI warning, SVG cursor/5×5 preview, plugin public-view boundary, fixed blast, stale-state guard and absence of map/RNG edits all match.

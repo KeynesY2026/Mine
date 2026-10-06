@@ -4,29 +4,21 @@
 const { neighbours, eachNei, randInt } = window.MineCore;
 
 function wantBomb(view) {
-  if (!view.canBomb) return false;
-  const M = view.mineCount, total = view.width * view.height;
-  const wish = Math.floor(M / total * (2 * view.bombRadiusH + 1) * (2 * view.bombRadiusV + 1));
-  const win = Math.floor(M / 2) + 1;
-  if (Math.abs(view.score - view.oppScore) > wish && randInt(2) === 0) return true;
-  if (win - view.score < wish) return true;
-  if (win - view.oppScore < wish) return true;
-  return false;
+  return !!view.canBomb && view.bombs > 0 && view.score < view.oppScore;
 }
 
 function bombCenterByAnalysis(view) {
   const candidates = view.analysis?.bombCenters;
   if (!candidates?.length) return null;
-  let bestYield = -Infinity;
+  let bestHidden = -1;
   let best = [];
   for (const candidate of candidates) {
-    if (candidate.hiddenCount === 0) continue;
-    if (candidate.expectedMines > bestYield) {
-      bestYield = candidate.expectedMines;
+    if (candidate.hiddenCount > bestHidden) {
+      bestHidden = candidate.hiddenCount;
       best = [candidate];
-    } else if (candidate.expectedMines === bestYield) best.push(candidate);
+    } else if (candidate.hiddenCount === bestHidden) best.push(candidate);
   }
-  if (!best.length) return null;
+  if (bestHidden <= 0) return null;
   const chosen = best[randInt(best.length)];
   return { type: 'bomb', x: chosen.x, y: chosen.y };
 }

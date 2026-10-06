@@ -52,6 +52,27 @@ function eachNei(nb, i, fn) {
   const n = nb.NEICnt[i];
   for (let k = 0; k < n; k++) fn(nb.NEI[i * 8 + k]);
 }
+function knownComponentCount(revealed, w, h) {
+  const nb = neighbours(w, h);
+  const visited = new Uint8Array(w * h);
+  let count = 0;
+  for (let start = 0; start < revealed.length; start++) {
+    if (!revealed[start] || visited[start]) continue;
+    count++;
+    const stack = [start];
+    visited[start] = 1;
+    while (stack.length) {
+      const cell = stack.pop();
+      eachNei(nb, cell, next => {
+        if (revealed[next] && !visited[next]) {
+          visited[next] = 1;
+          stack.push(next);
+        }
+      });
+    }
+  }
+  return count;
+}
 
 /* ---------------- 雷图生成：安全随机、尽量均匀铺开 ----------------
    每次放在距离已有地雷最远的候选格；距离并列时用安全随机数打破平局。 */
@@ -212,12 +233,46 @@ class Game {
     }
     return cells;
   }
+  bombBest() {
+    if (!this.canBomb(this.turn, { ai: true })) return { ok: false, why: 'cannot' };
+    const me = this.turn;
+    const score = this.scores[me];
+    const oppScore = this.scores[me === 'blue' ? 'red' : 'blue'];
+    const deficit = oppScore - score;
+    const componentCountBefore = knownComponentCount(this.revealed, this.w, this.h);
+    const eligible = [];
+
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
+      const center = y * this.w + x;
+      if (this.revealed[center]) continue;
+      const area = this.bombAreaCells(x, y);
+      const afterBlast = this.revealed.slice();
+      let mineHits = 0;
+      for (const cell of area) {
+        if (!afterBlast[cell]) {
+          afterBlast[cell] = 1;
+          if (this.mines[cell]) mineHits++;
+        }
+      }
+      const immediateWin = score + mineHits >= this.winNeed;
+      if (!immediateWin && (deficit < 3 ||
+          knownComponentCount(afterBlast, this.w, this.h) > componentCountBefore)) continue;
+      eligible.push({ x, y, mineHits });
+    }
+
+    if (!eligible.length) return { ok: false, why: 'no-target' };
+    const bestHits = Math.max(...eligible.map(candidate => candidate.mineHits));
+    const best = eligible.filter(candidate => candidate.mineHits === bestHits);
+    const chosen = best[randInt(best.length)];
+    return this.bomb(chosen.x, chosen.y, { ai: true });
+  }
   bomb(x, y, { ai = false } = {}) {
     if (this.over) return { ok: false };
     if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= this.w || y >= this.h) {
       this.bombMode = false;
       return { ok: false, why: 'invalid-target' };
     }
+    if (this.revealed[y * this.w + x]) return { ok: false, why: 'center-not-hidden' };
     if (!this.canBomb(this.turn, { ai })) { this.bombMode = false; return { ok: false, why: 'cannot' }; }
     const who = this.turn === 'blue' ? 1 : 2;
     const me = this.turn;

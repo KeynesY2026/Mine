@@ -66,7 +66,7 @@
   </main>
   <footer>
     规则：点开雷 +1 分并继续回合；点开数字交换回合；0 格自动展开；落后方可用炸弹强开一片区域。先拿到超过半数雷者获胜。
-    解锁后右键点击棋盘切换概率提示 · 插件接口: <code>makeDecision(view) → {type:'open'|'bomb', x, y}</code>
+    解锁后右键点击棋盘切换概率提示 · 插件接口: <code>makeDecision(view)</code>（普通着法为 open/bomb；无敌增强模式可请求受引擎校验的 bomb-auto）
   </footer>
 </div>
 
@@ -83,6 +83,7 @@
     </div>
     <div class="settings-options">
       <label><input type="checkbox" id="cfgDisableAiBombs"> 禁用 AI 使用炸弹</label>
+      <label><input type="checkbox" id="cfgEnhancedAI" checked> 无敌 AI 增强炸弹（允许按引擎评估自动使用）</label>
     </div>
     <div class="pblock blue">
       <div class="pt">蓝方（先手）</div>
@@ -101,7 +102,7 @@
     <div class="plugin-help">
       AI 名称与文件由 <code>plugin/ai-config.js</code> 配置；只有对局中选用的 AI 才会动态加载。<br>
       新插件实现 <code>makeDecision(view)</code>，并注册 <code>window.MineAIPlugins.register('id', makeDecision)</code>；再在配置文件中添加对应路径、ID 和显示名。<br>
-      返回 <code>{type:'open'|'bomb', x, y}</code> 或 null；炸弹目标由 AI 根据公开概率选择。view 含 <code>width height score oppScore mineCount remainMines bombs canBomb bombRadiusH bombRadiusV turn analysis</code>
+      返回 <code>{type:'open'|'bomb', x, y}</code> 或 null；炸弹目标由 AI 根据公开概率选择。仅无敌 AI 在增强选项开启且可用炸弹时，可请求 <code>{type:'bomb-auto', fallback: coordinateAction}</code>；引擎重新验证权限并执行自动策略，否则执行合法回退着法。view 含 <code>width height score oppScore mineCount remainMines bombs canBomb enhancedAI bombRadiusH bombRadiusV turn analysis</code>
       及 <code>cellAt(x,y)</code>（-2 未翻开 / -1 已翻开雷 / 0–8 已翻开数字）；<code>analysis</code> 是当前公开棋盘共享的只读概率快照。
     </div>
   </div>

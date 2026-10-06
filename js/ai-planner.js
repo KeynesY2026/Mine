@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const { neighbours, eachNei, randInt } = window.MineCore;
+  const { clamp, neighbours, eachNei, randInt } = window.MineCore;
   const DEFAULT_MAX_SEARCH_NODES = 250000;
 
   function analyze(view, options = {}) {
@@ -43,7 +43,7 @@
       const probabilities = new Map(hidden.map(cell => [cell, p]));
       const certainMines = p === 1 ? hidden : [];
       const certainSafes = p === 0 ? hidden : [];
-      return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact');
+      return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, 0);
     }
     if (maxSearchNodes === 0) return approximate(state, frontier, free, 'search limit exceeded');
 
@@ -85,11 +85,15 @@
       if (cluster.solved.solutions === 0n) return approximate(state, frontier, free, 'no satisfying assignments');
     }
 
+    const minFrontierMines = clusters.reduce((sum, cluster) => {
+      const minimum = cluster.solved.hist.findIndex(assignments => assignments > 0n);
+      return sum + minimum;
+    }, 0);
     const prefix = [ [1n] ];
     for (const cluster of clusters) prefix.push(convolve(prefix[prefix.length - 1], cluster.solved.hist));
     const freeWays = binomialRow(free.length);
     const denominator = dotCompatible(prefix[clusters.length], freeWays, remainMines);
-    if (denominator === 0n) return approximate(state, frontier, free, 'remaining mine count has no satisfying assignments');
+    if (denominator === 0n) return approximate(state, frontier, free, 'remaining mine count has no satisfying assignments', minFrontierMines);
 
     const probabilities = new Map();
     const certainMines = [];
@@ -136,8 +140,8 @@
       }
     }
 
-    if (probabilities.size !== hidden.length) return approximate(state, frontier, free, 'incomplete probability table');
-    return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact');
+    if (probabilities.size !== hidden.length) return approximate(state, frontier, free, 'incomplete probability table', minFrontierMines);
+    return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, minFrontierMines);
   }
 
   function readPublicState(view) {
@@ -269,23 +273,26 @@
     return Math.max(0, Math.min(1, (leftHead / rightHead) * (10 ** exponent)));
   }
 
-  function approximate(state, frontier, free, error) {
+  function approximate(state, frontier, free, error, minFrontierMines) {
     const risk = state.hidden.length ? state.remainMines / state.hidden.length : 0;
     const probabilities = new Map(state.hidden.map(cell => [cell, risk]));
-    return createAnalysis(state, frontier, free, probabilities, [], [], 'approximate', error);
+    return createAnalysis(state, frontier, free, probabilities, [], [], 'approximate', error, minFrontierMines);
   }
 
   function exactAnalysis(state, frontier, free, probabilities, certainMines, certainSafes) {
     return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact');
   }
 
-  function createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, quality, error) {
+  function createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, quality, error, minFrontierMines) {
     const hidden = Object.freeze(state.hidden.slice());
     const frozenFrontier = Object.freeze(frontier.slice());
     const frozenFree = Object.freeze(free.slice());
     const frozenCertainMines = Object.freeze(certainMines.slice().sort((a, b) => a - b));
     const frozenCertainSafes = Object.freeze(certainSafes.slice().sort((a, b) => a - b));
-    const freeMineProbability = frozenFree.length === 0 ? null : probabilities.get(frozenFree[0]);
+    const freeMineProbability = frozenFree.length === 0 ? null
+      : Number.isInteger(minFrontierMines)
+        ? clamp((state.remainMines - minFrontierMines) / frozenFree.length, 0, 1)
+        : probabilities.get(frozenFree[0]);
     const bombCenters = [];
     for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
       let expectedMines = 0;
@@ -298,7 +305,9 @@
         hiddenCount++;
         expectedMines += probabilities.get(cell) ?? 0;
       }
-      if (hiddenCount > 0) bombCenters.push(Object.freeze({ x, y, expectedMines, hiddenCount }));
+      if (hiddenCount > 0 && state.cells[y * state.width + x] === -2) {
+        bombCenters.push(Object.freeze({ x, y, expectedMines, hiddenCount }));
+      }
     }
     const analysis = {
       quality,

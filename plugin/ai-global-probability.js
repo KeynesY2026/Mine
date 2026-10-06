@@ -35,15 +35,7 @@ function strongDecide(view) {
   });
 
   // Preserve Medium's bomb timing and bomb-before-open order; target by shared expected yield.
-  const wish = Math.floor(view.mineCount / (w * h) * 25);
-  const winNeed = Math.floor(view.mineCount / 2) + 1;
-  const oppScore = view.oppScore;
-  const scoreDiff = Math.abs(view.score - oppScore);
-  const bombWanted = view.canBomb && view.bombs > 0 && (
-    (scoreDiff > wish && randInt(2) === 0) ||
-    winNeed - view.score < wish ||
-    (winNeed - oppScore < wish && oppScore >= view.score)
-  );
+  const bombWanted = view.canBomb && view.bombs > 0 && view.oppScore - view.score >= 5;
   if (bombWanted) {
     const bomb = bestBombCenter(view);
     if (bomb) return bomb;

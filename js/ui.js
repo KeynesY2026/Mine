@@ -196,7 +196,7 @@ function updateHUD() {
   bb.textContent = game.bombMode ? '💣 取消炸弹' : '💣 炸弹模式';
   $('bombGuide').classList.toggle('show', game.bombMode);
   $('bombGuide').textContent = game.bombMode
-    ? '炸弹范围固定 5×5（边缘会裁切）· 移动鼠标预览 · 点击中心引爆 · 再点按钮取消 · 剩余 ' + game.bombs[game.turn] + ' 枚'
+    ? '炸弹范围固定 5×5（边缘会裁切）· 飞机图标标记轰炸中心，红色区域为范围 · 点击未翻开的中心引爆 · 再点按钮取消 · 剩余 ' + game.bombs[game.turn] + ' 枚'
     : '';
   $('mineInfo').innerHTML = game.w + '×' + game.h + ' · 雷 <b>' + game.mineCount + '</b> · 胜线 <b>' + game.winNeed + '</b> · 炸弹 <b>5×5</b>';
   $('rulesInfo').textContent = '点开雷 +1 并续回合 · 点开数字/0 格换回合 · 落后方可炸弹 · 剩雷 ' + game.remainMines;
@@ -219,6 +219,7 @@ function onCellClick(x, y) {
   if (game.bombMode) r = game.bomb(x, y);
   else r = game.open(x, y);
   if (r.ok) afterMove(r);
+  else if (r.why === 'center-not-hidden') toast('炸弹中心必须选择未翻开的格子', true);
 }
 
 function afterMove(r, extraDelay) {
@@ -286,6 +287,7 @@ function makeView(p, shared = getSharedAnalysis()) {
     remainMines: source.remainMines,
     bombs: source.bombs,
     canBomb: source.canBomb,
+    enhancedAI: $('cfgEnhancedAI').checked,
     bombRadiusH: source.bombRadiusH,
     bombRadiusV: source.bombRadiusV,
     turn: source.turn,
@@ -356,13 +358,17 @@ function scheduleAI() {
     const currentView = makeView(p, currentShared);
     const fallbackDecision = MineAIPlanner.chooseFallback(currentView, currentShared.analysis, C.randInt);
     timers[p] += performance.now() - t0;
-    const resolved = decisionGuard.resolve(game, p, decision, { fallbackDecision });
+    const resolved = decisionGuard.resolve(game, p, decision, {
+      fallbackDecision,
+      pluginId: kind[p],
+      enhancedAI: $('cfgEnhancedAI').checked,
+    });
     if (resolved.noMoves) {
       toast('对局无处可走', true);
       return;
     }
     if (resolved.invalid && !decisionSourceFailed) toast('AI 走昏招了！', true, true);
-    applyDecision(p, resolved.action);
+    applyDecision(p, resolved.action, resolved.fallbackAction);
   }, delay);
 }
 
@@ -379,11 +385,32 @@ function recoverInvalidDecision(p) {
   else toast(label(p) + ' 无合法走法', true);
 }
 
-function applyDecision(p, decision) {
+function applyDecision(p, decision, fallbackAction) {
   if (!game || game.over || game.turn !== p || !decision) return;
+  let action = decision;
+  if (decision.type === 'bomb-auto') {
+    const authorized = kind[p] === 'constraint-probability' && $('cfgEnhancedAI').checked &&
+      game.canBomb(p, { ai: true });
+    if (authorized) {
+      const automatic = game.bombBest();
+      if (automatic?.ok) { afterMove(automatic); return; }
+    }
+
+    const currentShared = getSharedAnalysis();
+    const currentView = makeView(p, currentShared);
+    const publicFallback = MineAIPlanner.chooseFallback(currentView, currentShared.analysis, C.randInt);
+    const resolvedFallback = decisionGuard.resolve(game, p, fallbackAction, { fallbackDecision: publicFallback });
+    if (resolvedFallback.noMoves) {
+      toast('对局无处可走', true);
+      return;
+    }
+    if (resolvedFallback.invalid) toast('AI 自动炸弹未执行，改走公开回退着法', true, true);
+    action = resolvedFallback.action;
+  }
+
   let result;
-  if (decision.type === 'bomb') result = game.bomb(decision.x, decision.y, { ai: true });
-  else if (decision.type === 'open') result = game.open(decision.x, decision.y);
+  if (action.type === 'bomb') result = game.bomb(action.x, action.y, { ai: true });
+  else if (action.type === 'open') result = game.open(action.x, action.y);
   else result = { ok: false };
   if (result?.ok) afterMove(result);
   else {

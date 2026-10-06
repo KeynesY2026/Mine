@@ -1,6 +1,6 @@
 # MineStorm AI 概率术语与炸弹策略设计更新
 
-**状态：** 前版策略已获对话批准；本版补充全局隐藏中心规则与炸弹光标，等待用户审阅
+**状态：** 本版已获用户批准，按更新实施计划执行
 **日期：** 2026-10-06
 **基线：** `docs/superpowers/specs/2026-10-06-minestorm-shared-ai-planner-design.md`
 

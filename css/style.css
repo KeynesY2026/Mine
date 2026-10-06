@@ -89,9 +89,17 @@ main { flex: 1 1 auto; display: flex; min-height: 0; }
 }
 body.playing .cell.hidden:hover { background: var(--cell-hi); transform: translateY(-1px);
   box-shadow: inset 0 1px 0 #ffffff20, 0 3px 6px #00000055; z-index: 2; }
-body.bombing .cell.hidden { cursor: crosshair; }
+body.bombing .cell.hidden { cursor: none; }
 .cell.bomb-preview { background: linear-gradient(160deg, #74303f, #4e202e); box-shadow: inset 0 0 0 2px #ff657a, 0 0 10px #f0444477; z-index: 1; }
 .cell.bomb-preview-center { box-shadow: inset 0 0 0 3px #ffc94d, 0 0 16px #ffc94daa; z-index: 2; }
+.cell.hidden.bomb-preview-center::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  width: min(var(--cs), 100%); height: min(var(--cs), 100%);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23ffe08a' d='M4 31 26 26 38 8c2-3 7-2 6 2l-5 17 19 3c4 1 4 6 0 7l-21 4-9 15c-2 3-7 2-7-2l2-13-17 2c-5 0-6-9-2-12z'/%3E%3Cpath d='m42 42 4 6m2-3 4 6' stroke='%23ff6478' stroke-width='3' stroke-linecap='round' stroke-dasharray='1 4'/%3E%3Ccircle cx='47' cy='52' r='3' fill='%23ff6478'/%3E%3Ccircle cx='54' cy='58' r='2.5' fill='%23ff6478'/%3E%3C/svg%3E");
+  background-size: 92% 92%; background-position: center; background-repeat: no-repeat;
+  filter: drop-shadow(0 1px 4px #000) drop-shadow(0 0 4px #ffc94d);
+  pointer-events: none; z-index: 4;
+}
 .cell.revealed { background: var(--open); box-shadow: inset 0 1px 4px #00000060; cursor: default; }
 .cell.mine { background: #3a1220; }
 .cell.mine.owner-blue { --mine-owner: var(--blue); background: linear-gradient(145deg, #214b7f, #122943);

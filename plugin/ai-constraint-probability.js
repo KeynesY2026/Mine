@@ -105,8 +105,9 @@ function makeDecision(view) {
   const openProbability = probability(view, selected);
   if (openProbability === null) return null;
   const bomb = chooseBomb(view, openProbability);
-  if (bomb) return bomb;
-  return { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
+  const fallback = bomb || { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
+  if (view.enhancedAI === true && view.canBomb) return { type: 'bomb-auto', fallback };
+  return fallback;
 }
 
 window.MineAIPlugins.register('constraint-probability', makeDecision);

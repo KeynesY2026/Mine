@@ -107,7 +107,29 @@ test('separate frontier clusters combine with free-cell combinations before marg
   }
   assert.equal(analysis.mineProbabilityAt(0, 0), 0.25);
   assert.equal(analysis.mineProbabilityAt(2, 0), 0.75);
-  assert.equal(analysis.freeMineProbability, 0.25);
+  assert.equal(analysis.freeMineProbability, 0.5);
+});
+
+test('free-cell estimate clamps above one after subtracting frontier component minima', () => {
+  const board = view(15, 1, [
+    -2, 1, -2, 1, -2, -1, -1, -2, -2, -1, -2, 1, -2, 1, -2,
+  ], 5, 8);
+  const analysis = planner.analyze(board);
+
+  assert.equal(analysis.quality, 'exact');
+  assert.equal(analysis.freeMineProbability, 1);
+});
+
+test('globally inconsistent totals clamp the component-minimum estimate without claiming certainty', () => {
+  const board = view(15, 1, [
+    -2, 1, -2, 1, -2, -1, -1, -2, -2, -1, -2, 1, -2, 1, -2,
+  ], 1, 4);
+  const analysis = planner.analyze(board);
+
+  assert.equal(analysis.quality, 'approximate');
+  assert.equal(analysis.freeMineProbability, 0);
+  assert.deepEqual(Array.from(analysis.certainMines), []);
+  assert.deepEqual(Array.from(analysis.certainSafes), []);
 });
 
 test('public fallback follows frontier/free policy and returns only a legal hidden cell', () => {
@@ -128,6 +150,15 @@ test('analysis rates fixed 5x5 bomb centers with edge-clipped expected yields', 
   assert.deepEqual(JSON.parse(JSON.stringify(byCenter.get('0,0'))), { x: 0, y: 0, expectedMines: 9, hiddenCount: 9 });
   assert.deepEqual(JSON.parse(JSON.stringify(byCenter.get('3,3'))), { x: 3, y: 3, expectedMines: 25, hiddenCount: 25 });
   assert.equal(analysis.bombCenters.length, 49);
+});
+
+test('bomb-center candidates exclude revealed centers while retaining their hidden blast yield', () => {
+  const board = view(2, 1, [0, -2], 0);
+  const analysis = planner.analyze(board);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(analysis.bombCenters)), [
+    { x: 1, y: 0, expectedMines: 0, hiddenCount: 1 },
+  ]);
 });
 
 test('planner rejects invalid dimensions, mine totals and visible values', () => {

@@ -74,7 +74,7 @@ test('frontier with greater risk beats lower-risk free exploration', () => {
   randomIndex(0);
 
   assert.equal(board.analysis.mineProbabilityAt(2, 0), 0.75);
-  assert.equal(board.analysis.freeMineProbability, 0.25);
+  assert.equal(board.analysis.freeMineProbability, 0.5);
   const action = decide(board);
   assert.equal(action.type, 'open');
   assert.ok([2, 12].includes(action.x));
@@ -120,6 +120,43 @@ test('Invincible bomb yield uses fixed edge-clipped 5x5 centers and public expec
 
   const action = decide(board);
   assert.deepEqual(action, { type: 'bomb', x: 2, y: 2 });
+});
+
+test('Invincible requests auto-bomb only when enhanced mode is enabled and includes a legal fallback', () => {
+  const board = view(7, 7, Array(49).fill(-2), {
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 2, enhancedAI: true,
+  });
+  randomIndex(0);
+
+  const action = decide(board);
+
+  assert.equal(action.type, 'bomb-auto');
+  assert.ok(['open', 'bomb'].includes(action.fallback.type));
+  assert.ok(action.fallback.x >= 0 && action.fallback.x < board.width);
+  assert.ok(action.fallback.y >= 0 && action.fallback.y < board.height);
+  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
+});
+
+test('Invincible keeps coordinate actions when enhanced mode is disabled', () => {
+  const board = view(7, 7, Array(49).fill(-2), {
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 2, enhancedAI: false,
+  });
+  randomIndex(0);
+
+  assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
+});
+
+test('Invincible auto fallback remains public and permits a normal open when coordinate bombing declines', () => {
+  const board = view(7, 7, Array(49).fill(-2), {
+    mineCount: 11, remainMines: 11, bombs: 1, canBomb: true, oppScore: 2, enhancedAI: true,
+  });
+  randomIndex(0);
+
+  const action = decide(board);
+
+  assert.equal(action.type, 'bomb-auto');
+  assert.equal(action.fallback.type, 'open');
+  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
 });
 
 test('Invincible does not spend its last bomb below the winning expected-yield threshold', () => {

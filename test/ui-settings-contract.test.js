@@ -7,14 +7,14 @@ const ui = fs.readFileSync('js/ui.js', 'utf8');
 const core = fs.readFileSync('js/core.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 
-test('setup exposes bounded bomb inventory and session-only AI options', () => {
+test('setup exposes bounded bomb inventory and default-on enhanced AI option', () => {
   assert.match(html, /id="cfgBombs"[^>]*max="999"/);
   assert.match(html, /id="cfgDisableAiBombs"/);
-  assert.doesNotMatch(html, /cfgEnhancedAI|增强 AI/);
+  assert.match(html, /<input type="checkbox" id="cfgEnhancedAI" checked>/);
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
   assert.match(html, /id="cfgSpeed"/);
-  assert.doesNotMatch(html, /makeDecision\(view\)[^\n]*bomb-auto/);
+  assert.match(html, /bomb-auto/);
   assert.doesNotMatch(ui, /localStorage|sessionStorage/);
 });
 
@@ -29,14 +29,23 @@ test('hint and cheat controls stay hidden until the secret sequence unlocks them
   assert.doesNotMatch(ui, /window\.__mine[\s\S]{0,180}get game\(/);
 });
 
-test('AI receives a frozen shared public analysis and coordinate-only actions', () => {
+test('AI receives a frozen shared public analysis and only authorized auto-bomb routing', () => {
   assert.match(ui, /analysis:\s*shared\.analysis/);
+  assert.match(ui, /enhancedAI:\s*\$\('cfgEnhancedAI'\)\.checked/);
   assert.match(ui, /cellAt:\s*shared\.snapshot\.cellAt/);
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
   assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
-  assert.doesNotMatch(ui, /game\.bombBest|bomb-auto|cfgEnhancedAI/);
-  assert.doesNotMatch(core, /bombBest\s*\(/);
+  assert.match(ui, /pluginId:\s*kind\[p\]/);
+  assert.match(ui, /game\.bombBest\(\)/);
+  assert.match(ui, /cfgEnhancedAI/);
+  assert.match(ui, /cfgDisableAiBombs/);
+  assert.match(core, /bombBest\s*\(/);
   assert.match(core, /disableAiBombs/);
+  const applyDecision = ui.match(/function applyDecision\(p, decision, fallbackAction\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(applyDecision, /kind\[p\] === 'constraint-probability'[\s\S]*?\$\('cfgEnhancedAI'\)\.checked[\s\S]*?game\.canBomb\(p, \{ ai: true \}\)/);
+  assert.ok(applyDecision.indexOf('const authorized') < applyDecision.indexOf('game.bombBest()'));
+  assert.match(applyDecision, /decisionGuard\.resolve\(game, p, fallbackAction, \{ fallbackDecision: publicFallback \}\)/);
+  assert.match(applyDecision, /action = resolvedFallback\.action/);
 
   const coreScript = html.indexOf('<script src="js/core.js"></script>');
   const plannerScript = html.indexOf('<script src="js/ai-planner.js"></script>');
@@ -55,6 +64,24 @@ test('AI snapshots public state before lazy load and rejects stale asynchronous 
   assert.match(schedule, /boardRevision !== revisionAtSchedule/);
   assert.match(schedule, /if \(!isScheduledStateCurrent\(\)\) return;\s*if \(decide\) decision = decide\(scheduledView\)/);
   assert.match(schedule, /getSharedAnalysis\(\)\.stateKey === scheduledShared\.stateKey/);
+});
+
+test('human bomb mode shows a one-cell airplane icon without replacing the 5x5 preview', () => {
+  const iconRule = css.match(/\.cell\.hidden\.bomb-preview-center::after\s*\{([^}]+)\}/)?.[1] || '';
+  assert.match(css, /body\.bombing \.cell\.hidden\s*\{\s*cursor:\s*none;/);
+  assert.match(iconRule, /background-image:\s*url\("data:image\/svg\+xml,/);
+  assert.match(iconRule, /width:\s*min\(var\(--cs\),\s*100%\)/);
+  assert.match(iconRule, /height:\s*min\(var\(--cs\),\s*100%\)/);
+  assert.match(iconRule, /pointer-events:\s*none/);
+  assert.match(ui, /new Set\(game\.bombAreaCells\(bombPreviewCenter\.x, bombPreviewCenter\.y\)\)/);
+  assert.match(ui, /炸弹范围固定 5×5[^\n]*飞机图标/);
+});
+
+test('human bomb mode rejects revealed centers with an explanatory toast', () => {
+  const onCellClick = ui.match(/function onCellClick\(x, y\) \{([\s\S]*?)\n\}/)?.[1] || '';
+
+  assert.match(core, /this\.revealed\[y \* this\.w \+ x\][\s\S]{0,80}center-not-hidden/);
+  assert.match(onCellClick, /r\.why === 'center-not-hidden'[\s\S]{0,100}炸弹中心必须选择未翻开的格子/);
 });
 
 test('game-over announces the winning side and leaves the board available for review', () => {

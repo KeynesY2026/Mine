@@ -4,11 +4,12 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const plugins = {};
+let randomWord = 0;
 const sandbox = {
   window: {
     MineAIPlugins: { register(id, decide) { plugins[id] = decide; } },
   },
-  crypto: { getRandomValues(array) { array[0] = 0; return array; } },
+  crypto: { getRandomValues(array) { array[0] = randomWord; return array; } },
 };
 vm.createContext(sandbox);
 for (const path of [
@@ -23,7 +24,7 @@ function view(width, height, cells, overrides = {}) {
   const values = Int8Array.from(cells);
   const state = {
     width, height, score: 0, oppScore: 0, mineCount: 1, remainMines: 1,
-    bombs: 0, canBomb: false, turn: 'blue', ...overrides,
+    bombs: 0, canBomb: false, bombRadiusH: 2, bombRadiusV: 2, turn: 'blue', ...overrides,
     cellAt(x, y) { return values[y * width + x]; },
   };
   state.analysis = sandbox.window.MineAIPlanner.analyze(state);
@@ -88,6 +89,48 @@ test('Simple and Medium keep prioritizing a proven edge mine over interior cells
   for (const decide of [sandbox.window.MineCore.weakDecide, sandbox.window.MineCore.strongDecide]) {
     assert.deepEqual(JSON.parse(JSON.stringify(decide(board))), { type: 'open', x: 0, y: 3 });
   }
+});
+
+function withBombCenters(board, candidates) {
+  board.analysis = Object.freeze({
+    ...board.analysis,
+    bombCenters: Object.freeze(candidates.map(candidate => Object.freeze(candidate))),
+  });
+  return board;
+}
+
+test('Simple bombs while trailing and targets the blast covering most hidden cells', () => {
+  randomWord = 0;
+  const board = withBombCenters(view(35, 35, Array(35 * 35).fill(-2), {
+    mineCount: 50, remainMines: 50, bombs: 1, canBomb: true, score: 0, oppScore: 3,
+  }), [
+    { x: 0, y: 0, expectedMines: 3, hiddenCount: 25 },
+    { x: 5, y: 5, expectedMines: 9, hiddenCount: 9 },
+  ]);
+
+  const action = sandbox.window.MineCore.weakDecide(board);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(action)), { type: 'bomb', x: 0, y: 0 });
+});
+
+test('Medium does not bomb at a four-point deficit but does at five and maximizes expected yield', () => {
+  const cells = Array(35 * 35).fill(-2);
+  const candidates = [
+    { x: 0, y: 0, expectedMines: 1.25, hiddenCount: 9 },
+    { x: 5, y: 5, expectedMines: 0.5, hiddenCount: 25 },
+  ];
+  randomWord = 1;
+  const fourBehind = withBombCenters(view(35, 35, cells, {
+    mineCount: 50, remainMines: 50, bombs: 1, canBomb: true, score: 0, oppScore: 4,
+  }), candidates);
+  const fiveBehind = withBombCenters(view(35, 35, cells, {
+    mineCount: 50, remainMines: 50, bombs: 1, canBomb: true, score: 0, oppScore: 5,
+  }), candidates);
+
+  assert.equal(sandbox.window.MineCore.strongDecide(fourBehind).type, 'open');
+  assert.deepEqual(JSON.parse(JSON.stringify(sandbox.window.MineCore.strongDecide(fiveBehind))), {
+    type: 'bomb', x: 0, y: 0,
+  });
 });
 
 test('probability solver is absent from AI plugin side effects', () => {
