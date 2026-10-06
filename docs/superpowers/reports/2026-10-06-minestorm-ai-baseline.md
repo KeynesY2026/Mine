@@ -1,6 +1,6 @@
 # MineStorm AI development baseline
 
-**Status:** Complete development baseline with independent, read-only model review. No strategy changes were made; this report documents the baseline and review.
+**Status:** The formal baseline run completed, but its outcome validity is unresolved: the simulator may silently replace invalid AI decisions with legal fallbacks without counting them as errors. The reported outcomes below are simulator outputs, not verified valid-decision outcomes. No strategy changes were made; this report documents the baseline and review.
 
 ## Run identity and protocol
 
@@ -26,7 +26,7 @@ Task 4 smoke match:
 node scripts/ai-tournament.js --opponent heuristic --seed-start 42 --seed-count 1
 ```
 
-Result: two seat-swapped games, zero errors, same map hash; Invincible lost both games on this one-seed smoke check. This was a CLI smoke check, not part of the formal baseline.
+Result: two seat-swapped games, reported zero errors* (not a diagnostic metric; see the validity blocker below), same map hash; Invincible lost both games on this one-seed smoke check. This was a CLI smoke check, not part of the formal baseline.
 
 Throughput probe (wall time `9.09 s`; ten paired seed clusters per opponent):
 
@@ -59,14 +59,18 @@ The consolidated summary is `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-base
 
 All win/draw/loss counts and score margins are from Invincible's perspective. Confidence intervals are deterministic 95% cluster-bootstrap percentile intervals, resampling whole paired seed clusters (not individual games).
 
-| Opponent | Clusters | Games | Wins | Draws | Losses | Win rate | 95% cluster-bootstrap CI | Avg. score margin | Bomb-use rate | Errors |
+| Opponent | Clusters | Games | Wins | Draws | Losses | Win rate | 95% cluster-bootstrap CI | Avg. score margin | Bomb-use rate | Reported errors* |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Simple (`heuristic`) | 1000 | 2000 | 1136 | 0 | 864 | 56.80% | 54.65%–58.95% | +2.049 | 0/2000 (0%) | 0 |
-| Medium (`global-probability`) | 1000 | 2000 | 1366 | 0 | 634 | 68.30% | 66.30%–70.35% | +4.757 | 0/2000 (0%) | 0 |
+| Simple (`heuristic`) | 1000 | 2000 | 1136 | 0 | 864 | 56.80% | 54.65%–58.95% | +2.049 | 0/2000 (0%) | 0* |
+| Medium (`global-probability`) | 1000 | 2000 | 1366 | 0 | 634 | 68.30% | 66.30%–70.35% | +4.757 | 0/2000 (0%) | 0* |
 
-**Thresholds:** Simple's `70%` point target was not met (`56.80%`). Medium's `60%` point target was met (`68.30%`). Both lower 95% confidence bounds are above `50%` (`54.65%` and `66.30%`), so this sample establishes win rates significantly above an even result under the specified cluster-bootstrap interval.
+**Validity blocker:** The recorded counts, rates, intervals, and margins describe the simulator outputs, but the run cannot establish that every counted game followed a valid AI decision. When the decision guard marks a decision invalid, it supplies a legal fallback (`js/ai-decision.js:41`); the simulator checks for missing actions but not `resolved.invalid` (`scripts/ai-tournament-runtime.js:172-178`), and the summary reports `errors: 0` unconditionally (`scripts/ai-tournament-stats.js:211`). An invalid decision can therefore be executed as a normal game outcome. Until invalid decisions are treated as simulator errors and the baseline is rerun, interpret the reported win-rate results as provisional.
 
-**Pairing/error audit:** Each opponent has exactly `1000` blue-seat and `1000` red-seat games. All `1000/1000` paired clusters per opponent have identical map hashes across the two seat assignments. Both completed summaries report zero errors; there were no incomplete batches, invalid outcomes, or draws.
+**Thresholds (provisional):** Simple's `70%` point target was not met (`56.80%`). Medium's `60%` point target was met (`68.30%`). Both reported lower 95% confidence bounds are above `50%` (`54.65%` and `66.30%`), but these intervals do not resolve the decision-validity issue.
+
+**Pairing/error audit:** Each opponent has exactly `1000` blue-seat and `1000` red-seat games. All `1000/1000` paired clusters per opponent have identical map hashes across the two seat assignments. The batches completed and had no draws. The summaries' `0*` error values are not diagnostic because the summary hardcodes zero errors; the available run records therefore cannot rule out invalid AI decisions. No claim that there were no invalid outcomes is warranted.
+
+\* The stats implementation returns `errors: 0` unconditionally, so this column is not a verified error count.
 
 ## Loss patterns and bounded trace review packet
 
@@ -99,7 +103,8 @@ Descriptive tactical checks reconstructed the real planner analysis solely from 
 
 ### Review
 
-- **Correct:** The baseline reports paired maps, equal seat assignments, zero simulation errors, and separates public traces from postgame hidden maps. I treated mine-hit labels and final scores as post-action/postgame evidence only; they do not imply the AI knew hidden mines live.
+- **Correct:** Paired maps, equal seat assignments, and separation of public traces from postgame hidden maps match the available baseline artifacts. Mine-hit labels and final scores are post-action/postgame evidence only; they do not imply the AI knew hidden mines live.
+- **Finding — P1:** Invalid AI actions can be silently counted as valid games. The decision guard returns a legal fallback with `invalid: true` for an invalid decision (`js/ai-decision.js:41`), but the simulator checks only `noMoves` and `action`, not `resolved.invalid` (`scripts/ai-tournament-runtime.js:172-178`). The statistics report `errors: 0` unconditionally (`scripts/ai-tournament-stats.js:211`). This conflicts with the requirement that invalid actions be simulator errors (`docs/superpowers/specs/2026-10-06-minestorm-ai-tournament-design.md:22`), so the baseline's zero-error claim cannot validate its decision outcomes. The smallest source fix is to throw when `resolved.invalid` is true before executing the fallback, then rerun the baseline. This report-only correction does not implement that source fix.
 - **No code changes:** This is read-only analysis. The hypotheses below are not established causes.
 
 ### Report-ready findings: ranked falsifiable hypotheses
@@ -118,4 +123,4 @@ Descriptive tactical checks reconstructed the real planner analysis solely from 
 
 **Evidence scope:** I checked the baseline report, its bounded replay audit and named per-seed summaries, source policy seams, and sample trace/map artifacts. The raw JSONL games are single lines exceeding the read tool's 50 KiB limit, so I could not manually traverse every decision in the full traces. The packet is also a selected loss sample (ten clusters per opponent), not a representative sample for estimating policy effects. These hypotheses require paired validation, not causal conclusions from this review.
 
-- **Merge verdict:** OK with notes; the review was analysis only, with no strategy/source-code edits and no tests run as part of the review.
+- **Merge verdict:** BLOCK pending the invalid-decision simulator fix and a rerun or validation of the baseline; this report-only update does not resolve the source blocker. The review was analysis only, with no strategy/source-code edits and no tests run as part of the review.
