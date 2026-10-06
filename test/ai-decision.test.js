@@ -73,62 +73,14 @@ test('coordinate bombs stay coordinate actions regardless of legacy enhancement 
   }
 });
 
-test('bomb-auto is accepted only with Invincible authorization and a legal coordinate fallback', () => {
+test('coordinate-free bomb-auto is invalid after removal of the hidden selector', () => {
   const result = resolve(game([0, 0, 0, 0]), 'red', {
-    type: 'bomb-auto', fallback: { type: 'bomb', x: 1, y: 1 },
-  }, {
-    pluginId: 'constraint-probability', enhancedAI: true, fallbackDecision: fallback,
-  });
-
-  assert.deepEqual(plain(result), {
-    action: { type: 'bomb-auto' }, fallbackAction: { type: 'bomb', x: 1, y: 1 },
-    invalid: false, noMoves: false,
-  });
-});
-
-test('authorized immediate-win-only bomb-auto preserves its mode through the guard', () => {
-  const result = resolve(game([0, 0, 0, 0]), 'red', {
-    type: 'bomb-auto', immediateWinOnly: true, fallback,
-  }, {
-    pluginId: 'constraint-probability', enhancedAI: true, fallbackDecision: fallback,
-  });
-
-  assert.deepEqual(plain(result), {
-    action: { type: 'bomb-auto', immediateWinOnly: true }, fallbackAction: fallback,
-    invalid: false, noMoves: false,
-  });
-});
-
-test('bomb-auto authorization rejects other plugins, disabled mode and denied AI bombs', () => {
-  const decision = { type: 'bomb-auto', fallback: { type: 'open', x: 1, y: 1 } };
-  for (const options of [
-    { pluginId: 'heuristic', enhancedAI: true },
-    { pluginId: 'constraint-probability', enhancedAI: false },
-  ]) {
-    const result = resolve(game([0, 0, 0, 0]), 'red', decision, { ...options, fallbackDecision: fallback });
-    assert.deepEqual(plain(result), { action: fallback, invalid: true, noMoves: false });
-  }
-  const denied = resolve(game([0, 0, 0, 0], false), 'red', decision, {
-    pluginId: 'constraint-probability', enhancedAI: true, fallbackDecision: fallback,
-  });
-  assert.deepEqual(plain(denied), { action: fallback, invalid: true, noMoves: false });
-});
-
-test('bomb-auto with an invalid plugin fallback uses the scheduler public fallback', () => {
-  const result = resolve(game([0, 0, 0, 0]), 'red', {
-    type: 'bomb-auto', fallback: { type: 'open', x: -1, y: 0 },
+    type: 'bomb-auto', fallback: { type: 'open', x: 1, y: 1 },
   }, {
     pluginId: 'constraint-probability', enhancedAI: true, fallbackDecision: fallback,
   });
 
   assert.deepEqual(plain(result), { action: fallback, invalid: true, noMoves: false });
-});
-
-test('coordinate-free bomb-auto requests are rejected', () => {
-  assert.deepEqual(plain(resolve(game([0, 0, 0, 0]), 'red',
-    { type: 'bomb-auto' }, { fallbackDecision: fallback })), {
-    action: fallback, invalid: true, noMoves: false,
-  });
 });
 
 test('revealed bomb centers are rejected with the supplied public-policy fallback', () => {

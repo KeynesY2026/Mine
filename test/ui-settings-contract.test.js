@@ -14,7 +14,6 @@ test('setup exposes bounded bomb inventory and default-on enhanced AI option', (
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
   assert.match(html, /id="cfgSpeed"/);
-  assert.match(html, /bomb-auto/);
   assert.doesNotMatch(ui, /localStorage|sessionStorage/);
 });
 
@@ -29,23 +28,20 @@ test('hint and cheat controls stay hidden until the secret sequence unlocks them
   assert.doesNotMatch(ui, /window\.__mine[\s\S]{0,180}get game\(/);
 });
 
-test('AI receives a frozen shared public analysis and only authorized auto-bomb routing', () => {
+test('AI receives a frozen shared public analysis and routes coordinate bombs directly', () => {
   assert.match(ui, /analysis:\s*shared\.analysis/);
   assert.match(ui, /enhancedAI:\s*\$\('cfgEnhancedAI'\)\.checked/);
   assert.match(ui, /cellAt:\s*shared\.snapshot\.cellAt/);
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
   assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
-  assert.match(ui, /pluginId:\s*kind\[p\]/);
-  assert.match(ui, /game\.bombBest\(\{ immediateWinOnly: decision\.immediateWinOnly === true \}\)/);
   assert.match(ui, /cfgEnhancedAI/);
   assert.match(ui, /cfgDisableAiBombs/);
-  assert.match(core, /bombBest\s*\(/);
+  assert.match(ui, /game\.bomb\([^,]+\.x,\s*[^,]+\.y,\s*\{\s*ai:\s*true\s*\}\)/);
+  assert.doesNotMatch(ui, /bombBest|bomb-auto|immediateWinOnly/);
+  assert.doesNotMatch(core, /bombBest\s*\(/);
   assert.match(core, /disableAiBombs/);
-  const applyDecision = ui.match(/function applyDecision\(p, decision, fallbackAction\) \{([\s\S]*?)\n\}/)?.[1] || '';
-  assert.match(applyDecision, /kind\[p\] === 'constraint-probability'[\s\S]*?\$\('cfgEnhancedAI'\)\.checked[\s\S]*?game\.canBomb\(p, \{ ai: true \}\)/);
-  assert.ok(applyDecision.indexOf('const authorized') < applyDecision.indexOf('game.bombBest({'));
-  assert.match(applyDecision, /decisionGuard\.resolve\(game, p, fallbackAction, \{ fallbackDecision: publicFallback \}\)/);
-  assert.match(applyDecision, /action = resolvedFallback\.action/);
+  const applyDecision = ui.match(/function applyDecision\(p, action\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(applyDecision, /game\.bomb\(action\.x, action\.y, \{ ai: true \}\)/);
 
   const coreScript = html.indexOf('<script src="js/core.js"></script>');
   const plannerScript = html.indexOf('<script src="js/ai-planner.js"></script>');

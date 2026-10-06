@@ -161,11 +161,11 @@ test('runMatch completes a deterministic official-rule match', () => {
   assert.equal(Object.hasOwn(first, 'hiddenMap'), false);
 });
 
-test('runMatch forwards immediate-win-only bomb requests to the engine', () => {
+test('runMatch executes and traces the exact coordinate requested by Invincible', () => {
   const { createRuntime, runMatch } = require('../scripts/ai-tournament-runtime');
   const runtime = createRuntime(6);
   const NativeGame = runtime.core.MineCore.Game;
-  const modes = [];
+  const calls = [];
   runtime.core.MineCore.Game = class extends NativeGame {
     constructor(config) {
       super(config);
@@ -175,30 +175,26 @@ test('runMatch forwards immediate-win-only bomb requests to the engine', () => {
       this.scores.red = 1;
       this.hiddenCount--;
     }
-    bombBest(options) {
-      modes.push(options?.immediateWinOnly === true);
-      return super.bombBest(options);
+    bomb(x, y, options) {
+      calls.push({ x, y, ai: options?.ai });
+      return super.bomb(x, y, options);
     }
   };
   runtime.decisions['constraint-probability'] = view => {
-    let fallback = null;
-    for (let y = 0; y < view.height && !fallback; y++) for (let x = 0; x < view.width; x++) {
-      if (view.cellAt(x, y) === -2) { fallback = { type: 'open', x, y }; break; }
+    const cell = view.analysis.hiddenCells[0];
+    if (view.canBomb && view.bombs > 0) {
+      const center = view.analysis.bombCenters[0];
+      return { type: 'bomb', x: center.x, y: center.y };
     }
-    if (view.canBomb && view.bombs === 1) {
-      return { type: 'bomb-auto', immediateWinOnly: true, fallback };
-    }
-    return fallback;
+    return { type: 'open', x: cell % view.width, y: Math.floor(cell / view.width) };
   };
-
   const result = runMatch({
     seed: 6, invincibleSide: 'blue', opponentId: 'heuristic',
     width: 7, height: 7, mineCount: 9, bombCount: 1, includeTrace: true,
   }, runtime);
-
-  assert.ok(modes.length > 0);
-  assert.ok(modes.every(mode => mode));
-  assert.ok(result.trace.some(step => step.resolvedAction.immediateWinOnly === true));
+  const traced = result.trace.find(step => step.resolvedAction.type === 'bomb').resolvedAction;
+  assert.deepEqual(calls[0], { x: traced.x, y: traced.y, ai: true });
+  assert.equal(Object.hasOwn(traced, 'immediateWinOnly'), false);
 });
 
 test('runMatch rejects an invalid AI decision instead of executing its legal fallback', () => {

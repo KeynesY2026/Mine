@@ -358,17 +358,13 @@ function scheduleAI() {
     const currentView = makeView(p, currentShared);
     const fallbackDecision = MineAIPlanner.chooseFallback(currentView, currentShared.analysis, C.randInt);
     timers[p] += performance.now() - t0;
-    const resolved = decisionGuard.resolve(game, p, decision, {
-      fallbackDecision,
-      pluginId: kind[p],
-      enhancedAI: $('cfgEnhancedAI').checked,
-    });
+    const resolved = decisionGuard.resolve(game, p, decision, { fallbackDecision });
     if (resolved.noMoves) {
       toast('对局无处可走', true);
       return;
     }
     if (resolved.invalid && !decisionSourceFailed) toast('AI 走昏招了！', true, true);
-    applyDecision(p, resolved.action, resolved.fallbackAction);
+    applyDecision(p, resolved.action);
   }, delay);
 }
 
@@ -385,29 +381,8 @@ function recoverInvalidDecision(p) {
   else toast(label(p) + ' 无合法走法', true);
 }
 
-function applyDecision(p, decision, fallbackAction) {
-  if (!game || game.over || game.turn !== p || !decision) return;
-  let action = decision;
-  if (decision.type === 'bomb-auto') {
-    const authorized = kind[p] === 'constraint-probability' && $('cfgEnhancedAI').checked &&
-      game.canBomb(p, { ai: true });
-    if (authorized) {
-      const automatic = game.bombBest({ immediateWinOnly: decision.immediateWinOnly === true });
-      if (automatic?.ok) { afterMove(automatic); return; }
-    }
-
-    const currentShared = getSharedAnalysis();
-    const currentView = makeView(p, currentShared);
-    const publicFallback = MineAIPlanner.chooseFallback(currentView, currentShared.analysis, C.randInt);
-    const resolvedFallback = decisionGuard.resolve(game, p, fallbackAction, { fallbackDecision: publicFallback });
-    if (resolvedFallback.noMoves) {
-      toast('对局无处可走', true);
-      return;
-    }
-    if (resolvedFallback.invalid) toast('AI 自动炸弹未执行，改走公开回退着法', true, true);
-    action = resolvedFallback.action;
-  }
-
+function applyDecision(p, action) {
+  if (!game || game.over || game.turn !== p || !action) return;
   let result;
   if (action.type === 'bomb') result = game.bomb(action.x, action.y, { ai: true });
   else if (action.type === 'open') result = game.open(action.x, action.y);

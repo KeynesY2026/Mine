@@ -131,7 +131,7 @@ function runMatch({
   function decisionCopy(decision) {
     if (!decision || typeof decision !== 'object') return decision ?? null;
     const copy = {};
-    for (const key of ['type', 'x', 'y', 'immediateWinOnly']) {
+    for (const key of ['type', 'x', 'y']) {
       if (decision[key] !== undefined) copy[key] = decision[key];
     }
     if (decision.fallback !== undefined) copy.fallback = decisionCopy(decision.fallback);
@@ -169,11 +169,7 @@ function runMatch({
       view.analysis,
       MineCore.randInt,
     );
-    const resolved = runtime.decisionGuard.resolve(game, actor, decision, {
-      fallbackDecision,
-      pluginId,
-      enhancedAI: true,
-    });
+    const resolved = runtime.decisionGuard.resolve(game, actor, decision, { fallbackDecision });
     if (resolved.invalid === true) {
       throw new Error(`Invalid AI decision for ${pluginId} (${actor}) at seed ${seed}`);
     }
@@ -181,35 +177,11 @@ function runMatch({
       throw new Error(`No legal action for ${actor} with hidden cells remaining`);
     }
 
-    let executedAction = resolved.action;
+    const executedAction = resolved.action;
     let result;
-    if (resolved.action.type === 'bomb-auto') {
-      const automatic = game.bombBest({ immediateWinOnly: resolved.action.immediateWinOnly === true });
-      if (automatic?.ok) {
-        result = automatic;
-        executedAction = { type: 'bomb', x: automatic.x, y: automatic.y };
-      } else {
-        const fallbackState = makeView(actor);
-        const publicFallback = runtime.planner.MineAIPlanner.chooseFallback(
-          fallbackState.view,
-          fallbackState.view.analysis,
-          MineCore.randInt,
-        );
-        const fallback = runtime.decisionGuard.resolve(game, actor, resolved.fallbackAction, {
-          fallbackDecision: publicFallback,
-        });
-        if (fallback.noMoves || !fallback.action) {
-          throw new Error(`No legal fallback action for ${actor} after bomb-auto failed`);
-        }
-        executedAction = fallback.action;
-      }
-    }
-
-    if (!result) {
-      if (executedAction.type === 'open') result = game.open(executedAction.x, executedAction.y);
-      else if (executedAction.type === 'bomb') result = game.bomb(executedAction.x, executedAction.y, { ai: true });
-      else result = { ok: false, why: 'unsupported-action' };
-    }
+    if (executedAction.type === 'open') result = game.open(executedAction.x, executedAction.y);
+    else if (executedAction.type === 'bomb') result = game.bomb(executedAction.x, executedAction.y, { ai: true });
+    else result = { ok: false, why: 'unsupported-action' };
     if (!result?.ok) {
       throw new Error(`Action failed for ${actor} after decision resolution: ${result?.why || 'unknown reason'}`);
     }
