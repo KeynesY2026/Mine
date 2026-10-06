@@ -161,6 +161,46 @@ test('runMatch completes a deterministic official-rule match', () => {
   assert.equal(Object.hasOwn(first, 'hiddenMap'), false);
 });
 
+test('runMatch forwards immediate-win-only bomb requests to the engine', () => {
+  const { createRuntime, runMatch } = require('../scripts/ai-tournament-runtime');
+  const runtime = createRuntime(6);
+  const NativeGame = runtime.core.MineCore.Game;
+  const modes = [];
+  runtime.core.MineCore.Game = class extends NativeGame {
+    constructor(config) {
+      super(config);
+      const firstMine = this.mines.findIndex(Boolean);
+      this.revealed[firstMine] = 1;
+      this.owner[firstMine] = 2;
+      this.scores.red = 1;
+      this.hiddenCount--;
+    }
+    bombBest(options) {
+      modes.push(options?.immediateWinOnly === true);
+      return super.bombBest(options);
+    }
+  };
+  runtime.decisions['constraint-probability'] = view => {
+    let fallback = null;
+    for (let y = 0; y < view.height && !fallback; y++) for (let x = 0; x < view.width; x++) {
+      if (view.cellAt(x, y) === -2) { fallback = { type: 'open', x, y }; break; }
+    }
+    if (view.canBomb && view.bombs === 1) {
+      return { type: 'bomb-auto', immediateWinOnly: true, fallback };
+    }
+    return fallback;
+  };
+
+  const result = runMatch({
+    seed: 6, invincibleSide: 'blue', opponentId: 'heuristic',
+    width: 7, height: 7, mineCount: 9, bombCount: 1, includeTrace: true,
+  }, runtime);
+
+  assert.ok(modes.length > 0);
+  assert.ok(modes.every(mode => mode));
+  assert.ok(result.trace.some(step => step.resolvedAction.immediateWinOnly === true));
+});
+
 test('runMatch rejects an invalid AI decision instead of executing its legal fallback', () => {
   const { createRuntime, runMatch } = require('../scripts/ai-tournament-runtime');
   const runtime = createRuntime(12345);

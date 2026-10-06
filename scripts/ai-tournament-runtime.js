@@ -131,7 +131,7 @@ function runMatch({
   function decisionCopy(decision) {
     if (!decision || typeof decision !== 'object') return decision ?? null;
     const copy = {};
-    for (const key of ['type', 'x', 'y']) {
+    for (const key of ['type', 'x', 'y', 'immediateWinOnly']) {
       if (decision[key] !== undefined) copy[key] = decision[key];
     }
     if (decision.fallback !== undefined) copy.fallback = decisionCopy(decision.fallback);
@@ -184,7 +184,7 @@ function runMatch({
     let executedAction = resolved.action;
     let result;
     if (resolved.action.type === 'bomb-auto') {
-      const automatic = game.bombBest();
+      const automatic = game.bombBest({ immediateWinOnly: resolved.action.immediateWinOnly === true });
       if (automatic?.ok) {
         result = automatic;
         executedAction = { type: 'bomb', x: automatic.x, y: automatic.y };

@@ -392,7 +392,7 @@ function applyDecision(p, decision, fallbackAction) {
     const authorized = kind[p] === 'constraint-probability' && $('cfgEnhancedAI').checked &&
       game.canBomb(p, { ai: true });
     if (authorized) {
-      const automatic = game.bombBest();
+      const automatic = game.bombBest({ immediateWinOnly: decision.immediateWinOnly === true });
       if (automatic?.ok) { afterMove(automatic); return; }
     }
 

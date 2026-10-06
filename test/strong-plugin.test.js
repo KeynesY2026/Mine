@@ -173,9 +173,9 @@ test('Invincible keeps coordinate actions when enhanced mode is disabled', () =>
   assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
 });
 
-test('Invincible does not request auto-bomb when the coordinate strategy declines', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 11, remainMines: 11, bombs: 1, canBomb: true, oppScore: 4, enhancedAI: true,
+test('Invincible does not request auto-bomb when no blast can physically reach the win line', () => {
+  const board = view(15, 15, Array(225).fill(-2), {
+    mineCount: 53, remainMines: 53, bombs: 1, canBomb: true, oppScore: 4, enhancedAI: true,
   });
   randomIndex(0);
 
@@ -185,15 +185,21 @@ test('Invincible does not request auto-bomb when the coordinate strategy decline
   assert.equal(board.cellAt(action.x, action.y), -2);
 });
 
-test('Invincible conserves its last bomb when its qualifying blast cannot secure the win', () => {
-  const board = view(7, 2, Array(14).fill(-2), {
-    mineCount: 2, remainMines: 2, bombs: 1, canBomb: true, oppScore: 4,
+test('Invincible requests immediate-win-only auto-bomb despite deficit, coverage, and expected-yield gates', () => {
+  const cells = Array(225).fill(-2);
+  for (let cell = 0; cell < 41; cell++) cells[cell] = -1;
+  const board = view(15, 15, cells, {
+    mineCount: 53, remainMines: 12, bombs: 1, canBomb: true,
+    score: 20, oppScore: 21, enhancedAI: true,
   });
+  randomIndex(0);
 
-  assert.equal(board.analysis.bombCoverageRatio(1), 5 / 7);
-  const bestBombYield = Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines));
-  assert.ok(Math.abs(bestBombYield - 10 / 7) < 1e-12);
-  assert.ok(bestBombYield > 1 && bestBombYield < 2);
+  assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) < 7);
+  assert.ok(board.analysis.bombCoverageRatio(1) < 2 / 3);
   const action = decide(board);
-  assert.equal(action.type, 'open');
+
+  assert.equal(action.type, 'bomb-auto');
+  assert.equal(action.immediateWinOnly, true);
+  assert.equal(action.fallback.type, 'open');
+  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
 });

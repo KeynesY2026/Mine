@@ -36,14 +36,14 @@ test('AI receives a frozen shared public analysis and only authorized auto-bomb 
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
   assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
   assert.match(ui, /pluginId:\s*kind\[p\]/);
-  assert.match(ui, /game\.bombBest\(\)/);
+  assert.match(ui, /game\.bombBest\(\{ immediateWinOnly: decision\.immediateWinOnly === true \}\)/);
   assert.match(ui, /cfgEnhancedAI/);
   assert.match(ui, /cfgDisableAiBombs/);
   assert.match(core, /bombBest\s*\(/);
   assert.match(core, /disableAiBombs/);
   const applyDecision = ui.match(/function applyDecision\(p, decision, fallbackAction\) \{([\s\S]*?)\n\}/)?.[1] || '';
   assert.match(applyDecision, /kind\[p\] === 'constraint-probability'[\s\S]*?\$\('cfgEnhancedAI'\)\.checked[\s\S]*?game\.canBomb\(p, \{ ai: true \}\)/);
-  assert.ok(applyDecision.indexOf('const authorized') < applyDecision.indexOf('game.bombBest()'));
+  assert.ok(applyDecision.indexOf('const authorized') < applyDecision.indexOf('game.bombBest({'));
   assert.match(applyDecision, /decisionGuard\.resolve\(game, p, fallbackAction, \{ fallbackDecision: publicFallback \}\)/);
   assert.match(applyDecision, /action = resolvedFallback\.action/);
 

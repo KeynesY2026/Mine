@@ -233,7 +233,7 @@ class Game {
     }
     return cells;
   }
-  bombBest() {
+  bombBest({ immediateWinOnly = false } = {}) {
     if (!this.canBomb(this.turn, { ai: true })) return { ok: false, why: 'cannot' };
     const me = this.turn;
     const score = this.scores[me];
@@ -255,6 +255,7 @@ class Game {
         }
       }
       const immediateWin = score + mineHits >= this.winNeed;
+      if (immediateWinOnly && !immediateWin) continue;
       if (!immediateWin && (deficit < 3 ||
           knownComponentCount(afterBlast, this.w, this.h) > componentCountBefore)) continue;
       eligible.push({ x, y, mineHits });

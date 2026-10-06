@@ -163,7 +163,7 @@ test('BombBest respects AI bomb disablement and does not choose revealed centers
   assert.deepEqual([revealed.bombs.blue, revealed.rounds.blue, revealed.hiddenCount, revealed.turn], revealedBefore);
 });
 
-test('BombBest allows an immediate win even when it increases known-cell components', () => {
+test('BombBest immediate-win-only mode allows a direct win despite deficit and component filters', () => {
   const index = (x, y) => y * 11 + x;
   const board = configuredGame({
     width: 11, height: 11, mineCount: 5,
@@ -172,13 +172,28 @@ test('BombBest allows an immediate win even when it increases known-cell compone
   });
 
   assert.equal(knownComponentCount(board), 1);
-  const result = board.bombBest();
+  const result = board.bombBest({ immediateWinOnly: true });
 
   assert.equal(result.ok, true);
   assert.equal(result.mines, 4);
   assert.equal(knownComponentCount(board), 2);
   assert.equal(board.scores.blue, 4);
   assert.equal(board.winner, 'blue');
+});
+
+test('BombBest immediate-win-only mode preserves the last bomb when no blast wins', () => {
+  const index = (x, y) => y * 7 + x;
+  const mines = [index(0, 0), index(6, 0), index(0, 6), index(6, 6)];
+  const board = configuredGame({
+    width: 7, height: 7, mineCount: 4, mines,
+    revealed: [index(3, 3)], blueScore: 0, redScore: 3,
+  });
+  const before = [board.bombs.blue, board.rounds.blue, board.hiddenCount, board.turn];
+
+  assert.deepEqual(JSON.parse(JSON.stringify(board.bombBest({ immediateWinOnly: true }))), {
+    ok: false, why: 'no-target',
+  });
+  assert.deepEqual([board.bombs.blue, board.rounds.blue, board.hiddenCount, board.turn], before);
 });
 
 test('BombBest refuses non-winning automatic bombs when the deficit is below three', () => {

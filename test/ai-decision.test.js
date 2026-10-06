@@ -86,6 +86,19 @@ test('bomb-auto is accepted only with Invincible authorization and a legal coord
   });
 });
 
+test('authorized immediate-win-only bomb-auto preserves its mode through the guard', () => {
+  const result = resolve(game([0, 0, 0, 0]), 'red', {
+    type: 'bomb-auto', immediateWinOnly: true, fallback,
+  }, {
+    pluginId: 'constraint-probability', enhancedAI: true, fallbackDecision: fallback,
+  });
+
+  assert.deepEqual(plain(result), {
+    action: { type: 'bomb-auto', immediateWinOnly: true }, fallbackAction: fallback,
+    invalid: false, noMoves: false,
+  });
+});
+
 test('bomb-auto authorization rejects other plugins, disabled mode and denied AI bombs', () => {
   const decision = { type: 'bomb-auto', fallback: { type: 'open', x: 1, y: 1 } };
   for (const options of [

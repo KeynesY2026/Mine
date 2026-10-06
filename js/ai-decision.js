@@ -29,10 +29,14 @@
     if (decision?.type === 'bomb' && isHidden(decision.x, decision.y) && game.canBomb(player, { ai: true })) {
       return { action: { type: 'bomb', x: decision.x, y: decision.y }, invalid: false, noMoves: false };
     }
-    if (decision?.type === 'bomb-auto' && options.pluginId === 'constraint-probability' &&
-        options.enhancedAI === true && game.canBomb(player, { ai: true }) && isLegalAction(decision.fallback)) {
+    if (decision?.type === 'bomb-auto' &&
+        (decision.immediateWinOnly === undefined || decision.immediateWinOnly === true) &&
+        options.pluginId === 'constraint-probability' && options.enhancedAI === true &&
+        game.canBomb(player, { ai: true }) && isLegalAction(decision.fallback)) {
       return {
-        action: { type: 'bomb-auto' },
+        action: decision.immediateWinOnly === true
+          ? { type: 'bomb-auto', immediateWinOnly: true }
+          : { type: 'bomb-auto' },
         fallbackAction: { type: decision.fallback.type, x: decision.fallback.x, y: decision.fallback.y },
         invalid: false,
         noMoves: false,

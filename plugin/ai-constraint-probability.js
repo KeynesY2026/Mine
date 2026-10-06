@@ -48,10 +48,16 @@ function isAdjacentToRevealedMine(view, cell) {
   return false;
 }
 
-function chooseBomb(view, bestOpenMineProbability) {
-  if (!view.canBomb || view.bombs <= 0 || view.oppScore - view.score < 4 ||
-      view.analysis.bombCoverageRatio(view.bombs) < 2 / 3) return null;
+function chooseBomb(view, bestOpenMineProbability, fallback) {
+  if (!view.canBomb || view.bombs <= 0) return null;
   const candidates = view.analysis.bombCenters || [];
+  const winNeed = Math.floor(view.mineCount / 2) + 1;
+  const minesNeededToWin = winNeed - view.score;
+  if (view.enhancedAI === true && view.bombs === 1 && minesNeededToWin > 0 &&
+      candidates.some(candidate => candidate.hiddenCount >= minesNeededToWin)) {
+    return { type: 'bomb-auto', immediateWinOnly: true, fallback };
+  }
+  if (view.oppScore - view.score < 4 || view.analysis.bombCoverageRatio(view.bombs) < 2 / 3) return null;
   let bestYield = -Infinity;
   let bestCenters = [];
   for (const candidate of candidates) {
@@ -64,7 +70,6 @@ function chooseBomb(view, bestOpenMineProbability) {
     }
   }
   if (!bestCenters.length) return null;
-  const winNeed = Math.floor(view.mineCount / 2) + 1;
   const reachesWinLine = view.score + bestYield >= winNeed;
   const conserveLastBomb = view.bombs === 1;
   if (!reachesWinLine && (conserveLastBomb || bestYield < Math.max(1, bestOpenMineProbability + 0.5))) return null;
@@ -105,10 +110,12 @@ function makeDecision(view) {
 
   const openProbability = probability(view, selected);
   if (openProbability === null) return null;
-  const bomb = chooseBomb(view, openProbability);
-  const fallback = bomb || { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
-  if (view.enhancedAI === true && bomb) return { type: 'bomb-auto', fallback };
-  return fallback;
+  const fallback = { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
+  const bomb = chooseBomb(view, openProbability, fallback);
+  if (bomb?.type === 'bomb-auto') return bomb;
+  const action = bomb || fallback;
+  if (view.enhancedAI === true && bomb) return { type: 'bomb-auto', fallback: action };
+  return action;
 }
 
 window.MineAIPlugins.register('constraint-probability', makeDecision);
