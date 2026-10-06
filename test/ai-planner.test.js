@@ -161,8 +161,9 @@ test('analysis rates fixed 5x5 bomb centers with edge-clipped expected yields', 
   const analysis = planner.analyze(board);
   const byCenter = new Map(analysis.bombCenters.map(candidate => [`${candidate.x},${candidate.y}`, candidate]));
 
-  assert.deepEqual(JSON.parse(JSON.stringify(byCenter.get('0,0'))), { x: 0, y: 0, expectedMines: 9, hiddenCount: 9 });
-  assert.deepEqual(JSON.parse(JSON.stringify(byCenter.get('3,3'))), { x: 3, y: 3, expectedMines: 25, hiddenCount: 25 });
+  const project = ({ x, y, expectedMines, hiddenCount }) => ({ x, y, expectedMines, hiddenCount });
+  assert.deepEqual(project(byCenter.get('0,0')), { x: 0, y: 0, expectedMines: 9, hiddenCount: 9 });
+  assert.deepEqual(project(byCenter.get('3,3')), { x: 3, y: 3, expectedMines: 25, hiddenCount: 25 });
   assert.equal(analysis.bombCenters.length, 49);
 });
 
@@ -170,9 +171,39 @@ test('bomb-center candidates exclude revealed centers while retaining their hidd
   const board = view(2, 1, [0, -2], 0);
   const analysis = planner.analyze(board);
 
-  assert.deepEqual(JSON.parse(JSON.stringify(analysis.bombCenters)), [
+  assert.deepEqual(Array.from(analysis.bombCenters, ({ x, y, expectedMines, hiddenCount }) => ({ x, y, expectedMines, hiddenCount })), [
     { x: 1, y: 0, expectedMines: 0, hiddenCount: 1 },
   ]);
+});
+
+test('bomb centers publish independent-marginal hit-count estimates', () => {
+  const board = view(3, 2, [0, -2, -2, -2, -2, -2], 1);
+  const analysis = planner.analyze(board);
+  const center = analysis.bombCenters.find(candidate => candidate.x === 2 && candidate.y === 0);
+
+  assert.equal(analysis.quality, 'exact');
+  assert.ok(center);
+  assert.equal(center.expectedMines, 1);
+  assert.deepEqual(Array.from(center.estimatedHitCountProbabilities), [0.25, 0.5, 0.25]);
+  assert.equal(Object.isFrozen(center.estimatedHitCountProbabilities), true);
+});
+
+test('single possible mine region requires an exact constrained frontier and excludes opening/free regions', () => {
+  const decisive = planner.analyze(view(3, 3, [1, 1, 1, 1, -2, 1, 1, 1, 1], 1));
+  assert.equal(decisive.quality, 'exact');
+  assert.equal(decisive.singlePossibleMineRegion, true);
+
+  const untouched = planner.analyze(view(3, 3, Array(9).fill(-2), 1));
+  assert.equal(untouched.quality, 'exact');
+  assert.equal(untouched.singlePossibleMineRegion, false);
+
+  const separated = planner.analyze(view(5, 1, [-2, 1, -2, 1, -2], 2, 2));
+  assert.equal(separated.quality, 'exact');
+  assert.equal(separated.singlePossibleMineRegion, false);
+
+  const approximate = planner.analyze(view(3, 2, [-1, 0, -2, -2, -2, -2], 0, 1));
+  assert.equal(approximate.quality, 'approximate');
+  assert.equal(approximate.singlePossibleMineRegion, false);
 });
 
 test('planner rejects invalid dimensions, mine totals and visible values', () => {

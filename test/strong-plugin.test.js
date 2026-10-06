@@ -112,112 +112,130 @@ test('tail-game local exploration near a revealed mine overrides lower-priority 
   assert.ok([0, 2].includes(action.x));
 });
 
-test('Invincible bombs only when four points behind and coverage reaches two thirds', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4,
+test('Invincible spends when maximum expected blast yield cannot tie, otherwise conserves', () => {
+  const desperateCells = Array(225).fill(-2);
+  for (let cell = 0; cell < 25; cell++) desperateCells[cell] = -1;
+  const desperate = view(15, 15, desperateCells, {
+    mineCount: 53, remainMines: 28, bombs: 1, canBomb: true, score: 0, oppScore: 25,
   });
   randomIndex(0);
+  const maximum = Math.max(...desperate.analysis.bombCenters.map(candidate => candidate.expectedMines));
+  assert.equal(desperate.analysis.singlePossibleMineRegion, false);
+  assert.ok(maximum < desperate.oppScore - desperate.score);
+  const action = decide(desperate);
+  const best = desperate.analysis.bombCenters.find(candidate => candidate.expectedMines === maximum);
+  assert.deepEqual(action, { type: 'bomb', x: best.x, y: best.y });
 
-  assert.equal(board.analysis.bombCoverageRatio(2), 39 / 49);
-  assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
-
-  const threeBehind = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 3, enhancedAI: true,
+  const recoverableCells = Array(225).fill(-2);
+  for (let cell = 0; cell < 5; cell++) recoverableCells[cell] = -1;
+  const recoverable = view(15, 15, recoverableCells, {
+    mineCount: 53, remainMines: 48, bombs: 1, canBomb: true, score: 0, oppScore: 5,
   });
-  assert.equal(decide(threeBehind).type, 'open');
+  assert.ok(Math.max(...recoverable.analysis.bombCenters.map(candidate => candidate.expectedMines)) >= 5);
+  assert.equal(decide(recoverable).type, 'open');
 
-  const exactlyTwoThirds = view(15, 1, Array(15).fill(-2), {
-    mineCount: 8, remainMines: 8, bombs: 2, canBomb: true, oppScore: 4,
+  const boundary = view(3, 2, Array(6).fill(-2), {
+    mineCount: 1, remainMines: 1, bombs: 1, canBomb: true, score: 0, oppScore: 1,
   });
-  assert.equal(exactlyTwoThirds.analysis.bombCoverageRatio(2), 2 / 3);
-  assert.equal(decide(exactlyTwoThirds).type, 'bomb');
+  boundary.analysis = {
+    ...boundary.analysis,
+    singlePossibleMineRegion: false,
+    bombCenters: [{ x: 1, y: 0, hiddenCount: 1, expectedMines: 1, estimatedHitCountProbabilities: [0, 1] }],
+  };
+  assert.equal(decide(boundary).type, 'open');
 
-  const tooLittleCoverage = view(15, 15, Array(225).fill(-2), {
-    mineCount: 100, remainMines: 100, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: true,
+  const noCenters = view(3, 2, Array(6).fill(-2), {
+    mineCount: 1, remainMines: 1, bombs: 1, canBomb: true, score: 0, oppScore: 2,
   });
-  assert.ok(tooLittleCoverage.analysis.bombCoverageRatio(2) < 2 / 3);
-  assert.equal(decide(tooLittleCoverage).type, 'open');
+  noCenters.analysis = { ...noCenters.analysis, singlePossibleMineRegion: false, bombCenters: [] };
+  assert.equal(decide(noCenters).type, 'open');
 });
 
-test('Invincible bomb yield uses fixed edge-clipped 5x5 centers and public expected mines', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4,
+test('Invincible uses a legal last-region bomb and selects the best public win estimate', () => {
+  const width = 7, height = 7;
+  const hidden = [23, 24, 25];
+  const captured = [0, 48];
+  const mines = [...hidden, ...captured];
+  const cells = Array(width * height).fill(-2);
+  for (let index = 0; index < cells.length; index++) {
+    if (hidden.includes(index)) continue;
+    if (captured.includes(index)) { cells[index] = -1; continue; }
+    const x = index % width, y = Math.floor(index / width);
+    let adjacent = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if ((dx || dy) && nx >= 0 && ny >= 0 && nx < width && ny < height && mines.includes(ny * width + nx)) adjacent++;
+    }
+    cells[index] = adjacent;
+  }
+  const certainRegion = view(width, height, cells, {
+    mineCount: 5, remainMines: 3, bombs: 1, canBomb: true, score: 0, oppScore: 2,
   });
-  randomIndex(0);
+  assert.equal(certainRegion.analysis.quality, 'exact');
+  assert.equal(certainRegion.analysis.singlePossibleMineRegion, true);
+  assert.deepEqual(Array.from(certainRegion.analysis.hiddenCells), hidden);
+  const action = decide(certainRegion);
+  const selected = certainRegion.analysis.bombCenters.find(candidate => candidate.x === action.x && candidate.y === action.y);
+  assert.equal(action.type, 'bomb');
+  assert.equal(selected.estimatedHitCountProbabilities[3], 1);
 
-  const action = decide(board);
-  assert.deepEqual(action, { type: 'bomb', x: 2, y: 2 });
+  const estimated = view(3, 2, Array(6).fill(-2), {
+    mineCount: 5, remainMines: 5, bombs: 1, canBomb: true, score: 1, oppScore: 2,
+  });
+  estimated.analysis = {
+    ...estimated.analysis,
+    singlePossibleMineRegion: true,
+    bombCenters: [
+      { x: 0, y: 0, hiddenCount: 2, expectedMines: 1, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
+      { x: 1, y: 0, hiddenCount: 2, expectedMines: 1.25, estimatedHitCountProbabilities: [0, 0.75, 0.25] },
+    ],
+  };
+  assert.deepEqual(decide(estimated), { type: 'bomb', x: 0, y: 0 });
+
+  estimated.analysis = {
+    ...estimated.analysis,
+    bombCenters: [
+      { x: 0, y: 0, hiddenCount: 2, expectedMines: 1, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
+      { x: 1, y: 0, hiddenCount: 2, expectedMines: 1.5, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
+    ],
+  };
+  assert.deepEqual(decide(estimated), { type: 'bomb', x: 1, y: 0 });
 });
 
-test('Invincible requests auto-bomb only when enhanced mode is enabled and includes a legal fallback', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: true,
+test('Invincible runs the bomb policy before opening an exactly certain mine', () => {
+  const cells = [
+    -1, 1, 0, 0, -2, -2, -2,
+    -2, -2, 1, -2, -2, 4, -1,
+    -2, -2, -1, -2, -2, -2, -1,
+    0, -2, 1, 2, 3, -1, 3,
+    1, 2, 2, 2, 2, 1, 1,
+    -1, -2, -1, -2, -2, -2, 0,
+    1, 2, -2, 2, 1, 0, 0,
+  ];
+  const board = view(7, 7, cells, {
+    mineCount: 10, remainMines: 3, bombs: 1, canBomb: true, score: 2, oppScore: 5,
   });
-  randomIndex(0);
-
-  const action = decide(board);
-
-  assert.equal(action.type, 'bomb-auto');
-  assert.ok(['open', 'bomb'].includes(action.fallback.type));
-  assert.ok(action.fallback.x >= 0 && action.fallback.x < board.width);
-  assert.ok(action.fallback.y >= 0 && action.fallback.y < board.height);
-  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
-});
-
-test('Invincible keeps coordinate actions when enhanced mode is disabled', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: false,
-  });
-  randomIndex(0);
-
-  assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
-});
-
-test('Invincible does not request auto-bomb when no blast can physically reach the win line', () => {
-  const board = view(15, 15, Array(225).fill(-2), {
-    mineCount: 53, remainMines: 53, bombs: 1, canBomb: true, oppScore: 4, enhancedAI: true,
-  });
-  randomIndex(0);
-
-  const action = decide(board);
-
-  assert.equal(action.type, 'open');
-  assert.equal(board.cellAt(action.x, action.y), -2);
-});
-
-test('Invincible requests a winning last bomb before opening a certain mine', () => {
-  const cells = Array(9).fill(0);
-  cells[0] = -2;
-  for (const i of [1, 3, 4]) cells[i] = 1;
-  const board = view(3, 3, cells, {
-    mineCount: 1, remainMines: 1, bombs: 1, canBomb: true,
-    score: 0, oppScore: 1, enhancedAI: true,
-  });
-
   assert.equal(board.analysis.quality, 'exact');
-  assert.deepEqual(Array.from(board.analysis.certainMines), [0]);
-  const action = decide(board);
-
-  assert.equal(action.type, 'bomb-auto');
-  assert.equal(action.immediateWinOnly, true);
-  assert.deepEqual(action.fallback, { type: 'open', x: 0, y: 0 });
+  assert.ok(board.analysis.certainMines.length > 0);
+  assert.equal(board.analysis.singlePossibleMineRegion, false);
+  assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) < 3);
+  assert.equal(decide(board).type, 'bomb');
 });
 
-test('Invincible requests immediate-win-only auto-bomb despite deficit, coverage, and expected-yield gates', () => {
-  const cells = Array(225).fill(-2);
-  for (let cell = 0; cell < 41; cell++) cells[cell] = -1;
-  const board = view(15, 15, cells, {
-    mineCount: 53, remainMines: 12, bombs: 1, canBomb: true,
-    score: 20, oppScore: 21, enhancedAI: true,
+test('Invincible never bombs while leading, when bombing is disallowed, or without inventory', () => {
+  const cells = Array(49).fill(-2);
+  const leading = view(7, 7, cells, {
+    mineCount: 20, remainMines: 20, bombs: 1, canBomb: true, score: 3, oppScore: 2,
   });
-  randomIndex(0);
+  assert.equal(decide(leading).type, 'open');
 
-  assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) < 7);
-  assert.ok(board.analysis.bombCoverageRatio(1) < 2 / 3);
-  const action = decide(board);
+  const disabled = view(7, 7, cells, {
+    mineCount: 20, remainMines: 20, bombs: 1, canBomb: false, score: 0, oppScore: 5,
+  });
+  assert.equal(decide(disabled).type, 'open');
 
-  assert.equal(action.type, 'bomb-auto');
-  assert.equal(action.immediateWinOnly, true);
-  assert.equal(action.fallback.type, 'open');
-  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
+  const emptyInventory = view(7, 7, cells, {
+    mineCount: 20, remainMines: 20, bombs: 0, canBomb: true, score: 0, oppScore: 5,
+  });
+  assert.equal(decide(emptyInventory).type, 'open');
 });

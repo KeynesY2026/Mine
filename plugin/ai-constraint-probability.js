@@ -48,48 +48,59 @@ function isAdjacentToRevealedMine(view, cell) {
   return false;
 }
 
-function chooseImmediateWinBomb(view, fallback) {
-  if (!view.canBomb || view.enhancedAI !== true || view.bombs !== 1) return null;
-  const minesNeededToWin = Math.floor(view.mineCount / 2) + 1 - view.score;
-  const candidates = view.analysis.bombCenters || [];
-  if (minesNeededToWin <= 0 ||
-      !candidates.some(candidate => candidate.hiddenCount >= minesNeededToWin)) return null;
-  return { type: 'bomb-auto', immediateWinOnly: true, fallback };
+function selectByExpectedMines(candidates) {
+  let maximum = -Infinity;
+  let tied = [];
+  for (const candidate of candidates) {
+    if (candidate.expectedMines > maximum) {
+      maximum = candidate.expectedMines;
+      tied = [candidate];
+    } else if (candidate.expectedMines === maximum) tied.push(candidate);
+  }
+  return tied.length ? tied[randInt(tied.length)] : null;
 }
 
-function chooseBomb(view, bestOpenMineProbability, fallback) {
-  const immediateWinBomb = chooseImmediateWinBomb(view, fallback);
-  if (immediateWinBomb) return immediateWinBomb;
-  if (!view.canBomb || view.bombs <= 0) return null;
-  const candidates = view.analysis.bombCenters || [];
-  const winNeed = Math.floor(view.mineCount / 2) + 1;
-  if (view.oppScore - view.score < 4 || view.analysis.bombCoverageRatio(view.bombs) < 2 / 3) return null;
-  let bestYield = -Infinity;
-  let bestCenters = [];
+function selectByEstimatedWinProbability(candidates, needed) {
+  let maximum = -Infinity;
+  let tied = [];
   for (const candidate of candidates) {
-    if (!candidate.hiddenCount) continue;
-    if (candidate.expectedMines > bestYield) {
-      bestYield = candidate.expectedMines;
-      bestCenters = [candidate];
-    } else if (candidate.expectedMines === bestYield) {
-      bestCenters.push(candidate);
+    const probabilities = candidate.estimatedHitCountProbabilities || [];
+    let winProbability = 0;
+    for (let hits = Math.max(0, needed); hits < probabilities.length; hits++) {
+      winProbability += probabilities[hits];
     }
+    if (winProbability > maximum) {
+      maximum = winProbability;
+      tied = [candidate];
+    } else if (winProbability === maximum) tied.push(candidate);
   }
-  if (!bestCenters.length) return null;
-  const reachesWinLine = view.score + bestYield >= winNeed;
-  const conserveLastBomb = view.bombs === 1;
-  if (!reachesWinLine && (conserveLastBomb || bestYield < Math.max(1, bestOpenMineProbability + 0.5))) return null;
-  const center = bestCenters[randInt(bestCenters.length)];
-  return { type: 'bomb', x: center.x, y: center.y };
+  return selectByExpectedMines(tied);
+}
+
+function chooseBomb(view) {
+  if (!view.canBomb || view.bombs <= 0) return null;
+  const candidates = (view.analysis.bombCenters || []).filter(candidate => candidate.hiddenCount > 0);
+  if (!candidates.length) return null;
+
+  let best;
+  if (view.analysis.singlePossibleMineRegion) {
+    const needed = Math.floor(view.mineCount / 2) + 1 - view.score;
+    best = selectByEstimatedWinProbability(candidates, needed);
+  } else {
+    best = selectByExpectedMines(candidates);
+    if (!best || best.expectedMines >= view.oppScore - view.score) return null;
+  }
+  return best ? { type: 'bomb', x: best.x, y: best.y } : null;
 }
 
 function makeDecision(view) {
   const analysis = view.analysis;
   if (!analysis || !Array.isArray(analysis.hiddenCells) || analysis.hiddenCells.length === 0) return null;
+  const bomb = chooseBomb(view);
+  if (bomb) return bomb;
   if (analysis.quality === 'exact' && analysis.certainMines.length) {
     const mine = randomCell(analysis.certainMines);
-    const fallback = { type: 'open', x: mine % view.width, y: Math.floor(mine / view.width) };
-    return chooseImmediateWinBomb(view, fallback) || fallback;
+    return { type: 'open', x: mine % view.width, y: Math.floor(mine / view.width) };
   }
 
   const frontier = Array.from(analysis.frontierCells);
@@ -115,14 +126,8 @@ function makeDecision(view) {
     if (local.length) selected = lowestRiskCell(view, local);
   }
 
-  const openProbability = probability(view, selected);
-  if (openProbability === null) return null;
-  const fallback = { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
-  const bomb = chooseBomb(view, openProbability, fallback);
-  if (bomb?.type === 'bomb-auto') return bomb;
-  const action = bomb || fallback;
-  if (view.enhancedAI === true && bomb) return { type: 'bomb-auto', fallback: action };
-  return action;
+  if (probability(view, selected) === null) return null;
+  return { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
 }
 
 window.MineAIPlugins.register('constraint-probability', makeDecision);

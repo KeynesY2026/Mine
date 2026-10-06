@@ -273,6 +273,37 @@
     return Math.max(0, Math.min(1, (leftHead / rightHead) * (10 ** exponent)));
   }
 
+  function hasSinglePossibleMineRegion(state, frontier, probabilities, quality) {
+    if (quality !== 'exact' || frontier.length === 0) return false;
+    const possible = new Set();
+    for (const cell of state.hidden) {
+      const probability = probabilities.get(cell);
+      if (probability > 0) possible.add(cell);
+      else if (probability !== 0) return false;
+    }
+    if (possible.size === 0) return false;
+
+    const first = possible.values().next().value;
+    const visited = new Set([first]);
+    const pending = [first];
+    for (let index = 0; index < pending.length; index++) {
+      const cell = pending[index];
+      const x = cell % state.width;
+      const y = Math.floor(cell / state.width);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
+        const neighbour = ny * state.width + nx;
+        if (possible.has(neighbour) && !visited.has(neighbour)) {
+          visited.add(neighbour);
+          pending.push(neighbour);
+        }
+      }
+    }
+    return visited.size === possible.size;
+  }
+
   function approximate(state, frontier, free, error, minFrontierMines) {
     const risk = state.hidden.length ? state.remainMines / state.hidden.length : 0;
     const probabilities = new Map(state.hidden.map(cell => [cell, risk]));
@@ -297,16 +328,33 @@
     for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
       let expectedMines = 0;
       let hiddenCount = 0;
+      let estimatedHitCountProbabilities = [1];
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
         const cell = ny * state.width + nx;
         if (state.cells[cell] !== -2) continue;
         hiddenCount++;
-        expectedMines += probabilities.get(cell) ?? 0;
+        const probability = probabilities.get(cell) ?? 0;
+        expectedMines += probability;
+        const next = new Array(estimatedHitCountProbabilities.length + 1).fill(0);
+        for (let hits = 0; hits < estimatedHitCountProbabilities.length; hits++) {
+          next[hits] += estimatedHitCountProbabilities[hits] * (1 - probability);
+          next[hits + 1] += estimatedHitCountProbabilities[hits] * probability;
+        }
+        estimatedHitCountProbabilities = next;
+      }
+      while (estimatedHitCountProbabilities.length > 1 && estimatedHitCountProbabilities[estimatedHitCountProbabilities.length - 1] === 0) {
+        estimatedHitCountProbabilities.pop();
       }
       if (hiddenCount > 0 && state.cells[y * state.width + x] === -2) {
-        bombCenters.push(Object.freeze({ x, y, expectedMines, hiddenCount }));
+        bombCenters.push(Object.freeze({
+          x,
+          y,
+          expectedMines,
+          hiddenCount,
+          estimatedHitCountProbabilities: Object.freeze(estimatedHitCountProbabilities),
+        }));
       }
     }
     const analysis = {
@@ -315,6 +363,7 @@
       frontierCells: frozenFrontier,
       freeCells: frozenFree,
       freeMineProbability,
+      singlePossibleMineRegion: hasSinglePossibleMineRegion(state, frozenFrontier, probabilities, quality),
       bombCenters: Object.freeze(bombCenters),
       certainMines: frozenCertainMines,
       certainSafes: frozenCertainSafes,
