@@ -1,10 +1,10 @@
 # MineStorm AI development baseline
 
-**Status:** The strict formal baseline and a paired final-bomb direct-win experiment are complete. Both treatment tournaments completed with no invalid decisions or incomplete matches; an independent reviewer found no code issues. Baseline results remain separate from treatment results. The broader policy of spending a last bomb when it is unlikely to recover the deficit remains untested.
+**Status:** The strict baseline and corrected paired final-bomb direct-win experiment are complete. The first treatment missed an exact-analysis early-return path and is superseded by the corrected rerun. The corrected tournament had no invalid decisions or incomplete matches; independent reviewers found no code issues. The broader policy of spending a last bomb when it is unlikely to recover the deficit remains untested.
 
 ## Run identity and protocol
 
-- Tournament tooling commit: `8c441b712a8b1b590e749cebbab9376d87eb25d3` (`feat: add AI tournament command line`). Strict invalid-decision validation and regression test: `c44d904` (`fix: reject invalid tournament decisions`). Tasks 1–4 are present in the committed history: seeded runtime `62f8df7`, match simulator `856c6e8`, paired statistics `3997c19`, and CLI `8c441b7`.
+- Tournament tooling commit: `8c441b712a8b1b590e749cebbab9376d87eb25d3` (`feat: add AI tournament command line`). Strict invalid-decision validation and regression test: `c44d904` (`fix: reject invalid tournament decisions`). Direct-win exception: `e709774`; exact-analysis bypass correction: `47dae46`. Tasks 1–4 are present in the committed history: seeded runtime `62f8df7`, match simulator `856c6e8`, paired statistics `3997c19`, and CLI `8c441b7`.
 - Runtime: Node.js `v24.14.0`.
 - Standard configuration: `15×15`, `53` mines, `1` bomb per player, enhanced AI enabled; AI bombs were not disabled.
 - Split/range: development seeds `100000–100999`, inclusive; `1000` seed clusters per opponent. Every cluster ran Invincible as blue and red, for `2000` games per opponent and `4000` baseline games total. The validation split was not used.
@@ -18,7 +18,7 @@ Full tests and runtime version:
 node --version && node --test test/*.test.js
 ```
 
-Baseline validation result: Node `v24.14.0`; all `101` tests passed after strict invalid-decision validation. After the direct-win override, `node --test test/*.test.js` passed all `104` tests.
+Baseline validation result: Node `v24.14.0`; all `101` tests passed after strict invalid-decision validation. The initial direct-win override passed `104` tests; after adding the exact-certain-mine bypass regression and correction, `node --test test/*.test.js` passed all `105` tests.
 
 Task 4 smoke match:
 
@@ -84,26 +84,28 @@ Descriptive tactical checks reconstructed the real planner analysis solely from 
 - **Bomb timing:** no Invincible bombs were used in the full baseline (`0/4000` games). In the selected traces, Invincible had `canBomb` on `559` Simple and `388` Medium turns, but none also met both the current deficit threshold (`≥4`) and bomb-coverage threshold (`≥2/3`). The packet therefore does not provide an observed bomb-use/timing example; it cannot establish whether an alternate bomb policy would improve results.
 - **Score conversion / close-out:** the loss counts above show frequent losses after scoring at least `20` and, more specifically, at least `24`. Review these as endgame opportunities to investigate, not established causes.
 
-## First paired final-bomb direct-win experiment
+## Paired final-bomb direct-win experiment (corrected)
 
-This experiment tested the narrow user-requested exception: when Invincible has exactly one bomb and some public blast center has enough hidden cells to physically reach the win line, bypass the ordinary score-deficit, coverage, and expected-yield gates and ask the core for an **immediate-winning bomb only**. `Game.bombBest({ immediateWinOnly: true })` filters using actual engine state; if no blast immediately wins, it returns no target without consuming the bomb and the AI takes its legal public open fallback. The plugin uses `hiddenCount` only as a necessary physical-capacity check, not as a probability estimate. Ordinary bomb policy is otherwise unchanged.
+The narrow policy allows the last bomb to bypass the usual deficit, coverage, and expected-yield gates only when public blast capacity could physically reach the win line. It requests `Game.bombBest({ immediateWinOnly: true })`, which checks actual engine state and spends the bomb only if the blast reaches the win line; otherwise the plugin takes its legal open fallback. `hiddenCount` is only a necessary physical-capacity check, not an estimated win probability.
 
-The treatment used commit `e709774` and the same `100000–100999` seed range, both seat assignments, and identical maps as the strict baseline. The formal command completed in `11m28.447s`:
+**Important correction:** The first treatment version (`e709774`) checked the direct-win exception only after an early return for exact analyses with certain mines. That meant some winning-bomb states still opened a certain mine. A regression test reproduced this (`actual 'open', expected 'bomb-auto'`). Commit `47dae46` moves the same public-capacity check onto that early-return path while retaining the certain mine as fallback. The earlier treatment metrics from `e709774` are superseded below; they are not results for the corrected final policy.
+
+The corrected treatment used `47dae46` on the same `100000–100999` seeds, both seat assignments, and identical maps as baseline. The command completed in `9m31.987s`:
 
 ```sh
-time node scripts/ai-tournament.js --opponent both --seed-start 100000 --seed-count 1000 --output 'C:/Users/keyn1/AppData/Local/Temp/minestorm-ai-baseline-Kk2vfn/direct-win-1000.json' > 'C:/Users/keyn1/AppData/Local/Temp/minestorm-ai-baseline-Kk2vfn/direct-win-1000.stdout.json'
+time node scripts/ai-tournament.js --opponent both --seed-start 100000 --seed-count 1000 --output 'C:/Users/keyn1/AppData/Local/Temp/minestorm-ai-baseline-Kk2vfn/direct-win-1000-post-certain-fix.json' > 'C:/Users/keyn1/AppData/Local/Temp/minestorm-ai-baseline-Kk2vfn/direct-win-1000-post-certain-fix.stdout.json'
 ```
 
-| Opponent | Baseline wins / rate | Treatment wins / rate | Treatment 95% cluster CI | Paired win-rate change (95% paired-cluster bootstrap CI) | Average margin: baseline → treatment | Paired margin change (95% CI) | Bomb-using games | Errors |
+| Opponent | Baseline wins / rate | Corrected treatment wins / rate | Treatment 95% cluster CI | Paired win-rate change (95% paired-cluster bootstrap CI) | Average margin: baseline → treatment | Paired margin change (95% CI) | Bomb-using games | Errors |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Simple (`heuristic`) | 1136/2000 (56.80%) | 1218/2000 (60.90%) | 58.75%–63.05% | +4.10 pp (+1.30 to +6.85 pp) | +2.049 → +2.2105 | +0.1615 (−0.196 to +0.5195) | 115/2000 | 0 |
-| Medium (`global-probability`) | 1366/2000 (68.30%) | 1435/2000 (71.75%) | 69.75%–73.75% | +3.45 pp (+1.15 to +5.75 pp) | +4.757 → +4.8415 | +0.0845 (−0.214 to +0.382) | 124/2000 | 0 |
+| Simple (`heuristic`) | 1136/2000 (56.80%) | 1226/2000 (61.30%) | 59.15%–63.40% | +4.50 pp (+1.50 to +7.35 pp) | +2.049 → +2.159 | +0.110 (−0.285 to +0.503) | 136/2000 | 0 |
+| Medium (`global-probability`) | 1366/2000 (68.30%) | 1458/2000 (72.90%) | 70.85%–74.85% | +4.60 pp (+2.25 to +6.95 pp) | +4.757 → +4.905 | +0.148 (−0.163 to +0.456) | 131/2000 | 0 |
 
-The paired interval resamples the `1000` matched seed clusters, keeping both seat-swapped games together, for `20000` replicates (deterministic bootstrap seeds `20261006` for Simple and `20261007` for Medium). Simple clusters improved/worsened/tied `311/248/441`; Medium `240/184/576`. Treatment paired maps and seat assignments matched the baseline for all `1000/1000` clusters per opponent. Both win-rate difference intervals are above zero; the paired score-margin intervals cross zero. This supports the narrow direct-win-only change on this seed range, not the separate broad “spend the last bomb even when it is unlikely to recover the deficit” policy.
+Paired bootstrap resampled the `1000` matched seed clusters, keeping the two seat-swapped games together, for `20000` replicates. Win-rate delta seeds were `20261008` (Simple) and `20261009` (Medium); margin-delta seeds were `20261010` and `20261011`. Simple clusters improved/worsened/tied `331/257/412`; Medium `266/192/542`. Treatment maps and seat assignments matched the strict baseline in all `1000/1000` clusters per opponent. Both win-rate difference intervals are above zero; paired score-margin intervals cross zero. This supports the corrected direct-win-only rule on this seed range, not the separate broad “spend the last bomb even when it is unlikely to recover the deficit” policy.
 
-A bounded audit reran ten treatment clusters per opponent with at least one bomb use, both seats, public traces and separate postgame hidden maps. The public traces recorded `11` actual Simple bombs and `10` Medium bombs; every bomb request carried `immediateWinOnly: true`, immediately reached the win line, and matched its treatment map hash. The `20` hidden maps per opponent each contain exactly `53` mines; the two seat maps for every seed are identical. Public trace files contain no hidden map. The files are under `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-replays\`; the machine-readable pairing/bootstrap/trace audit is `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-audit.json`. Baseline and treatment JSON are `C:\Users\keyn1\AppData\Local\Temp\mine27b-baseline-1000.json` and `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-1000.json` respectively.
+The corrected bounded audit reran ten treatment clusters per opponent where at least one bomb was used, both seats, with public traces and separate postgame hidden maps. In those `20` games per opponent there were `10` actual winning bombs each; every actual bomb used `immediateWinOnly: true` and reached the win line. There were also `514` (Simple) and `545` (Medium) strict attempts that found no actual winning blast and therefore used the open fallback without spending the bomb. All `20` hidden maps per opponent contain exactly `53` mines, paired seat maps are identical, and public traces contain no hidden map. Artifacts are under `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-post-certain-replays\`; audit JSON is `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-post-certain-audit.json`. Inputs are `C:\Users\keyn1\AppData\Local\Temp\mine27b-baseline-1000.json` and `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-1000-post-certain-fix.json`.
 
-**Interpretation:** In these paired tests, the strict direct-win exception increased win rate against both opponents. Average score-margin differences were small and uncertain; no claim is made that the general comeback-bomb policy is solved. Independent review of commit `e709774` found no code issues; the reviewer did not rerun tests or the tournament.
+**Interpretation:** The corrected direct-win exception improved paired win rate against both opponents, while average score-margin changes remain uncertain. This does not establish that spending a bomb without an immediate win is beneficial. Independent code review of both `e709774` and the follow-up `47dae46` found no issues; the follow-up reviewer did not rerun the 105-test suite or tournament.
 
 ## Independent read-only review
 
@@ -115,7 +117,7 @@ A bounded audit reran ten treatment clusters per opponent with at least one bomb
 
 ### Report-ready findings: ranked falsifiable hypotheses
 
-1. **Direct-win final-bomb exception (tested; see experiment above).** The strict baseline used no bombs in 4000 Invincible games. In the selected loss traces, Invincible had `canBomb` on 559 Simple and 388 Medium turns, but none met both old gates (deficit ≥4, coverage ≥2/3); it also conserved the last bomb unless `score + bestYield` reached the win line (`plugin/ai-constraint-probability.js:51-70`). The paired follow-up bypasses these gates only for an engine-verified immediate win. The measured win-rate gain was +4.10 percentage points vs Simple and +3.45 points vs Medium, with paired cluster-bootstrap CIs above zero in both cases. This supports the narrow actual-winning-bomb exception on the evaluated seed range. It does **not** validate use of an expected yield as win probability or a policy that spends a last bomb when no direct win exists. The 401/864 Simple losses and 344/634 Medium losses at ≥24 points are still only postgame close-out categories, not evidence for that broader policy.
+1. **Direct-win final-bomb exception (tested; see experiment above).** The strict baseline used no bombs in 4000 Invincible games. In the selected loss traces, Invincible had `canBomb` on 559 Simple and 388 Medium turns, but none met both old gates (deficit ≥4, coverage ≥2/3); it also conserved the last bomb unless `score + bestYield` reached the win line (`plugin/ai-constraint-probability.js:51-70`). The corrected paired follow-up bypasses these gates on both the ordinary and exact-certain-mine paths, only for an engine-verified immediate win. On the corrected evaluated seed range, paired win-rate gains were +4.50 percentage points vs Simple (95% CI +1.50 to +7.35) and +4.60 points vs Medium (+2.25 to +6.95). This supports the narrow actual-winning-bomb exception on that seed range. It does **not** validate use of an expected yield as win probability or a policy that spends a last bomb when no direct win exists. The 401/864 Simple losses and 344/634 Medium losses at ≥24 points are still only postgame close-out categories, not evidence for that broader policy.
 
 2. **Ablate the close-out low-risk preference against a win-probability objective.** The loss table records 745/1,498 losses ending at ≥24 points, three or fewer points short of the 27-point winning threshold on a 53-mine board. The policy has a special case when scores are within two and either player is within three of the win line; it then chooses the lowest-risk hidden cell adjacent to a revealed mine (`plugin/ai-constraint-probability.js:98-103`). This is a plausible decision seam to test, **not evidence that the branch caused those losses**; final scores are retrospective.
 
@@ -129,8 +131,8 @@ A bounded audit reran ten treatment clusters per opponent with at least one bomb
 
 - **Prior merge verdict:** BLOCK pending invalid-decision enforcement and a strict rerun. That blocker was resolved by `c44d904`; the validated results above supersede the provisional baseline. This baseline review preceded the direct-win strategy commit `e709774`.
 
-### Direct-win code review
+### Direct-win code reviews
 
-- **Finding:** No Critical, Important, or Minor code issues. The reviewer verified that the plugin triggers strict mode using only public `hiddenCount`, the engine filters actual non-winning blasts, and UI/decision-guard/tournament runtime preserve authorization and the strict-mode flag.
-- **Tests cited:** `test/strong-plugin.test.js:188-205`, `test/bomb-area.test.js:166-196`, `test/ai-decision.test.js:89-100`, `test/ai-tournament.test.js:161-201`.
-- **Verdict:** OK with notes. The reviewer inspected the exact committed diff and current source but did not rerun the 104-test suite or long tournament; those validations are reported from the parent run.
+- **Finding:** No Critical, Important, or Minor code issues. Reviewers verified that the plugin triggers strict mode using only public `hiddenCount`, the engine filters actual non-winning blasts, the exact-certain-mine path retains a legal fallback, and UI/decision-guard/tournament runtime preserve authorization and the strict-mode flag.
+- **Tests cited:** `test/strong-plugin.test.js:187-203`, `test/bomb-area.test.js:166-196`, `test/ai-decision.test.js:89-100`, `test/ai-tournament.test.js:161-201`.
+- **Verdict:** OK. The follow-up reviewer inspected the exact working-tree patch for `47dae46` and source; they did not rerun the 105-test suite or full tournament, which were verified by the parent.
