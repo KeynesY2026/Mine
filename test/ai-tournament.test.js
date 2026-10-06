@@ -161,6 +161,22 @@ test('runMatch completes a deterministic official-rule match', () => {
   assert.equal(Object.hasOwn(first, 'hiddenMap'), false);
 });
 
+test('runMatch rejects an invalid AI decision instead of executing its legal fallback', () => {
+  const { createRuntime, runMatch } = require('../scripts/ai-tournament-runtime');
+  const runtime = createRuntime(12345);
+  runtime.decisions['constraint-probability'] = () => ({ type: 'open', x: -1, y: -1 });
+
+  assert.throws(() => runMatch({
+    seed: 12345,
+    invincibleSide: 'blue',
+    opponentId: 'heuristic',
+    width: 7,
+    height: 7,
+    mineCount: 9,
+    bombCount: 1,
+  }, runtime), /Invalid AI decision/);
+});
+
 test('runTournament pairs both Invincible seats on the same seeded map', () => {
   const tournament = runTournament({
     opponentId: 'heuristic',

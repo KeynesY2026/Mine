@@ -77,7 +77,7 @@ function runMatch({
   bombCount = 1,
   includeTrace = false,
   includeHiddenMap = false,
-}) {
+}, runtimeOverride) {
   if (invincibleSide !== 'blue' && invincibleSide !== 'red') {
     throw new Error(`Invalid Invincible side: ${invincibleSide}`);
   }
@@ -85,7 +85,7 @@ function runMatch({
     throw new Error(`Invalid opponent ID: ${opponentId}`);
   }
 
-  const runtime = createRuntime(seed);
+  const runtime = runtimeOverride || createRuntime(seed);
   const { MineCore } = runtime.core;
   const game = new MineCore.Game({ width, height, mineCount, bombCount });
   const opponentSide = invincibleSide === 'blue' ? 'red' : 'blue';
@@ -174,6 +174,9 @@ function runMatch({
       pluginId,
       enhancedAI: true,
     });
+    if (resolved.invalid === true) {
+      throw new Error(`Invalid AI decision for ${pluginId} (${actor}) at seed ${seed}`);
+    }
     if (resolved.noMoves || !resolved.action) {
       throw new Error(`No legal action for ${actor} with hidden cells remaining`);
     }
