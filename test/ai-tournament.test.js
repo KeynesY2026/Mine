@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createSeededCrypto, createRuntime } = require('../scripts/ai-tournament-runtime');
+const { runTournament, summarizeTournament } = require('../scripts/ai-tournament-stats');
 
 test('seeded crypto fills deterministic words and continues its sequence', () => {
   const first = createSeededCrypto(12345);
@@ -70,6 +71,86 @@ test('runMatch completes a deterministic official-rule match', () => {
   assert.ok(['blue', 'red', 'draw'].includes(first.winner));
   assert.equal(first.trace, undefined);
   assert.equal(Object.hasOwn(first, 'hiddenMap'), false);
+});
+
+test('runTournament pairs both Invincible seats on the same seeded map', () => {
+  const tournament = runTournament({
+    opponentId: 'heuristic',
+    seedStart: 12345,
+    seedCount: 1,
+    width: 7,
+    height: 7,
+    mineCount: 9,
+    bombCount: 1,
+  });
+
+  assert.equal(tournament.opponentId, 'heuristic');
+  assert.equal(tournament.seedStart, 12345);
+  assert.equal(tournament.seedCount, 1);
+  assert.equal(tournament.matches.length, 2);
+  assert.equal(tournament.seedClusters.length, 1);
+  const [blueSeatResult, redSeatResult] = tournament.seedClusters[0].games;
+  assert.deepEqual(
+    [blueSeatResult.invincibleSide, redSeatResult.invincibleSide].sort(),
+    ['blue', 'red'],
+  );
+  assert.equal(blueSeatResult.mapHash, redSeatResult.mapHash);
+  assert.equal(tournament.seedClusters[0].mapHash, blueSeatResult.mapHash);
+  assert.ok(tournament.matches.every(match => match.seed === 12345));
+});
+
+test('runTournament returns an incomplete result without a win-rate conclusion on match errors', () => {
+  const tournament = runTournament({
+    opponentId: 'heuristic',
+    seedStart: 12345,
+    seedCount: 1,
+    width: -1,
+    height: 7,
+    mineCount: 9,
+    bombCount: 1,
+  });
+
+  assert.equal(tournament.seedClusters.length, 0);
+  assert.equal(tournament.matches.length, 0);
+  assert.equal(tournament.incomplete.failedSeed, 12345);
+  assert.equal(tournament.incomplete.failedSeat, 'blue');
+  assert.equal(tournament.incomplete.errorCount, 1);
+  assert.match(tournament.incomplete.error, /.+/);
+  assert.deepEqual(tournament.incomplete.successfulPartialGames, []);
+  assert.equal(Object.hasOwn(tournament, 'winRate'), false);
+});
+
+test('summarizeTournament reports paired outcomes and reproducible cluster bootstrap intervals', () => {
+  function game(invincibleSide, invincibleOutcome, scoreMargin, bombsUsed) {
+    const winner = invincibleOutcome === 'draw'
+      ? 'draw'
+      : invincibleOutcome === 'win'
+        ? invincibleSide
+        : invincibleSide === 'blue' ? 'red' : 'blue';
+    return { invincibleSide, winner, scoreMargin, bombsUsed };
+  }
+  const seedClusters = [
+    { seed: 1, mapHash: 'map-1', games: [game('blue', 'win', 2, 1), game('red', 'win', 4, 0)] },
+    { seed: 2, mapHash: 'map-2', games: [game('blue', 'win', 6, 1), game('red', 'draw', 0, 1)] },
+    { seed: 3, mapHash: 'map-3', games: [game('blue', 'loss', -2, 0), game('red', 'loss', -4, 0)] },
+    { seed: 4, mapHash: 'map-4', games: [game('blue', 'draw', 0, 1), game('red', 'loss', -6, 0)] },
+  ];
+
+  const first = summarizeTournament(seedClusters, { bootstrapSeed: 7654, bootstrapReplicates: 500 });
+  const second = summarizeTournament(seedClusters, { bootstrapSeed: 7654, bootstrapReplicates: 500 });
+
+  assert.equal(first.games, 8);
+  assert.equal(first.wins, 3);
+  assert.equal(first.draws, 2);
+  assert.equal(first.losses, 3);
+  assert.equal(first.winRate, 0.5);
+  assert.equal(first.averageScoreMargin, 0);
+  assert.equal(first.bombUseRate, 0.5);
+  assert.equal(first.errors, 0);
+  assert.deepEqual(first.confidence95, second.confidence95);
+  assert.ok(first.confidence95.lower >= 0 && first.confidence95.lower <= 1);
+  assert.ok(first.confidence95.upper >= 0 && first.confidence95.upper <= 1);
+  assert.ok(first.confidence95.lower <= first.confidence95.upper);
 });
 
 test('runMatch traces public inputs and only attaches hidden map after completion', () => {
