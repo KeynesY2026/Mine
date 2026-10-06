@@ -4,7 +4,7 @@
 const { neighbours, eachNei, randInt } = window.MineCore;
 
 function wantBomb(view) {
-  return !!view.canBomb && view.bombs > 0 && view.score < view.oppScore;
+  return !!view.canBomb && view.bombs > 0 && view.oppScore - view.score >= 2;
 }
 
 function bombCenterByAnalysis(view) {

@@ -112,9 +112,36 @@ test('tail-game local exploration near a revealed mine overrides lower-priority 
   assert.ok([0, 2].includes(action.x));
 });
 
+test('Invincible bombs only when four points behind and coverage reaches two thirds', () => {
+  const board = view(7, 7, Array(49).fill(-2), {
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4,
+  });
+  randomIndex(0);
+
+  assert.equal(board.analysis.bombCoverageRatio(2), 39 / 49);
+  assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
+
+  const threeBehind = view(7, 7, Array(49).fill(-2), {
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 3, enhancedAI: true,
+  });
+  assert.equal(decide(threeBehind).type, 'open');
+
+  const exactlyTwoThirds = view(15, 1, Array(15).fill(-2), {
+    mineCount: 8, remainMines: 8, bombs: 2, canBomb: true, oppScore: 4,
+  });
+  assert.equal(exactlyTwoThirds.analysis.bombCoverageRatio(2), 2 / 3);
+  assert.equal(decide(exactlyTwoThirds).type, 'bomb');
+
+  const tooLittleCoverage = view(15, 15, Array(225).fill(-2), {
+    mineCount: 100, remainMines: 100, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: true,
+  });
+  assert.ok(tooLittleCoverage.analysis.bombCoverageRatio(2) < 2 / 3);
+  assert.equal(decide(tooLittleCoverage).type, 'open');
+});
+
 test('Invincible bomb yield uses fixed edge-clipped 5x5 centers and public expected mines', () => {
   const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 1,
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4,
   });
   randomIndex(0);
 
@@ -124,7 +151,7 @@ test('Invincible bomb yield uses fixed edge-clipped 5x5 centers and public expec
 
 test('Invincible requests auto-bomb only when enhanced mode is enabled and includes a legal fallback', () => {
   const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 2, enhancedAI: true,
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: true,
   });
   randomIndex(0);
 
@@ -139,31 +166,34 @@ test('Invincible requests auto-bomb only when enhanced mode is enabled and inclu
 
 test('Invincible keeps coordinate actions when enhanced mode is disabled', () => {
   const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 2, enhancedAI: false,
+    mineCount: 30, remainMines: 30, bombs: 2, canBomb: true, oppScore: 4, enhancedAI: false,
   });
   randomIndex(0);
 
   assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 2 });
 });
 
-test('Invincible auto fallback remains public and permits a normal open when coordinate bombing declines', () => {
+test('Invincible does not request auto-bomb when the coordinate strategy declines', () => {
   const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 11, remainMines: 11, bombs: 1, canBomb: true, oppScore: 2, enhancedAI: true,
+    mineCount: 11, remainMines: 11, bombs: 1, canBomb: true, oppScore: 4, enhancedAI: true,
   });
   randomIndex(0);
 
   const action = decide(board);
 
-  assert.equal(action.type, 'bomb-auto');
-  assert.equal(action.fallback.type, 'open');
-  assert.equal(board.cellAt(action.fallback.x, action.fallback.y), -2);
+  assert.equal(action.type, 'open');
+  assert.equal(board.cellAt(action.x, action.y), -2);
 });
 
-test('Invincible does not spend its last bomb below the winning expected-yield threshold', () => {
-  const board = view(7, 7, Array(49).fill(-2), {
-    mineCount: 11, remainMines: 11, bombs: 1, canBomb: true, oppScore: 1,
+test('Invincible conserves its last bomb when its qualifying blast cannot secure the win', () => {
+  const board = view(7, 2, Array(14).fill(-2), {
+    mineCount: 2, remainMines: 2, bombs: 1, canBomb: true, oppScore: 4,
   });
 
+  assert.equal(board.analysis.bombCoverageRatio(1), 5 / 7);
+  const bestBombYield = Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines));
+  assert.ok(Math.abs(bestBombYield - 10 / 7) < 1e-12);
+  assert.ok(bestBombYield > 1 && bestBombYield < 2);
   const action = decide(board);
   assert.equal(action.type, 'open');
 });

@@ -34,8 +34,9 @@ function strongDecide(view) {
     return !hasInteriorHidden || !edge || (analysis.quality === 'exact' && certainMines.has(i));
   });
 
-  // Preserve Medium's bomb timing and bomb-before-open order; target by shared expected yield.
-  const bombWanted = view.canBomb && view.bombs > 0 && view.oppScore - view.score >= 5;
+  // Bomb only when at least half of the unknown cells are coverable with the remaining inventory.
+  const bombWanted = view.canBomb && view.bombs > 0 && view.oppScore - view.score >= 3 &&
+    analysis.bombCoverageRatio(view.bombs) >= 0.5;
   if (bombWanted) {
     const bomb = bestBombCenter(view);
     if (bomb) return bomb;

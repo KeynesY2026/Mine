@@ -49,7 +49,8 @@ function isAdjacentToRevealedMine(view, cell) {
 }
 
 function chooseBomb(view, bestOpenMineProbability) {
-  if (!view.canBomb || view.bombs <= 0) return null;
+  if (!view.canBomb || view.bombs <= 0 || view.oppScore - view.score < 4 ||
+      view.analysis.bombCoverageRatio(view.bombs) < 2 / 3) return null;
   const candidates = view.analysis.bombCenters || [];
   let bestYield = -Infinity;
   let bestCenters = [];
@@ -106,7 +107,7 @@ function makeDecision(view) {
   if (openProbability === null) return null;
   const bomb = chooseBomb(view, openProbability);
   const fallback = bomb || { type: 'open', x: selected % view.width, y: Math.floor(selected / view.width) };
-  if (view.enhancedAI === true && view.canBomb) return { type: 'bomb-auto', fallback };
+  if (view.enhancedAI === true && bomb) return { type: 'bomb-auto', fallback };
   return fallback;
 }
 

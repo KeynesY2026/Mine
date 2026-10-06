@@ -318,6 +318,29 @@
       bombCenters: Object.freeze(bombCenters),
       certainMines: frozenCertainMines,
       certainSafes: frozenCertainSafes,
+      bombCoverageRatio(bombCount) {
+        if (!Number.isSafeInteger(bombCount) || bombCount <= 0 || hidden.length === 0) return 0;
+        const covered = new Set();
+        const shots = Math.min(bombCount, hidden.length);
+        for (let shot = 0; shot < shots && covered.size < hidden.length; shot++) {
+          let bestCells = [];
+          for (const center of bombCenters) {
+            const centerCell = center.y * state.width + center.x;
+            if (covered.has(centerCell)) continue;
+            const newlyCovered = [];
+            for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+              const nx = center.x + dx, ny = center.y + dy;
+              if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
+              const cell = ny * state.width + nx;
+              if (state.cells[cell] === -2 && !covered.has(cell)) newlyCovered.push(cell);
+            }
+            if (newlyCovered.length > bestCells.length) bestCells = newlyCovered;
+          }
+          if (!bestCells.length) break;
+          for (const cell of bestCells) covered.add(cell);
+        }
+        return covered.size / hidden.length;
+      },
       mineProbabilityAt(x, y) {
         if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= state.width || y >= state.height) return undefined;
         return probabilities.get(y * state.width + x);

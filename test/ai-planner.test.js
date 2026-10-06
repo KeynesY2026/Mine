@@ -141,6 +141,20 @@ test('public fallback follows frontier/free policy and returns only a legal hidd
   assert.deepEqual(JSON.parse(JSON.stringify(action)), { type: 'open', x: 2, y: 0 });
 });
 
+test('bomb coverage estimate greedily counts distinct hidden cells across remaining blasts', () => {
+  const board = view(15, 1, Array(15).fill(-2), 15);
+  const analysis = planner.analyze(board);
+
+  assert.equal(analysis.bombCoverageRatio(0), 0);
+  assert.equal(analysis.bombCoverageRatio(1), 1 / 3);
+  assert.equal(analysis.bombCoverageRatio(2), 2 / 3);
+  assert.equal(analysis.bombCoverageRatio(3), 1);
+  assert.equal(analysis.bombCoverageRatio(100), 1);
+
+  const overlappingBlasts = planner.analyze(view(7, 7, Array(49).fill(-2), 49));
+  assert.equal(overlappingBlasts.bombCoverageRatio(2), 39 / 49);
+});
+
 test('analysis rates fixed 5x5 bomb centers with edge-clipped expected yields', () => {
   assert.equal(typeof planner?.analyze, 'function', 'planner exposes analyze(publicView)');
   const board = view(7, 7, Array(49).fill(-2), 49);
