@@ -178,7 +178,7 @@ git commit -m "feat: add AI tournament command line"
 
 **Interfaces:**
 - The report contains tool commit, exact command/config, seed ranges, pair/game counts, per-opponent wins/draws/losses, win rate, 95% cluster-bootstrap interval, score margin, bomb-use rate, wall time, errors, and a short interpretation.
-- Raw traces remain outside the repository unless explicitly selected for archival; the report records their path and seed span so a reviewer can reproduce them.
+- Full baseline raw traces are not required; summary JSON covers every seed cluster. Bounded representative loss traces and their separately saved post-game maps remain outside the repository, and the report records their exact paths and seed IDs so a reviewer can reproduce them.
 - The strategy-review packet contains aggregate statistics plus representative loss traces from development seeds only. It is read-only input for independent model analysis.
 
 - [ ] **Step 1: Run all unit tests**
@@ -193,7 +193,7 @@ Record wall time and verify both opponents get ten paired seeds. Use the observe
 
 - [ ] **Step 3: Run and save the development baseline**
 
-Run the standard settings for both opponents over disjoint development seeds starting at `100000`, with at least `1000` clusters each. Save JSONL traces outside the repository and summary JSON for analysis. Verify every cluster has two matching map hashes, both seats appear equally often, and the error count is zero. If the sample does not establish whether each win rate is significantly above `50%`, increase the seed count before drawing a conclusion.
+Run the standard settings for both opponents over disjoint development seeds starting at `100000`, with at least `1000` clusters each, initially without full traces. Save summary JSON outside the repository. From completed losses, select up to ten representative seed clusters per opponent, then rerun only those seeds with public JSONL traces and separately saved post-game hidden maps for model review. Verify every baseline cluster has two matching map hashes, both seats appear equally often, and the error count is zero. If the sample does not establish whether each win rate is significantly above `50%`, increase the seed count before drawing a conclusion.
 
 - [ ] **Step 4: Write the baseline report**
 
