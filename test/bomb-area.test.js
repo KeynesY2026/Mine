@@ -25,6 +25,20 @@ test('bombAreaCells clips the rectangle at board edges', () => {
   assert.deepEqual(Array.from(board.bombAreaCells(0, 0)), [0, 1, 2, 15, 16, 17, 30, 31, 32]);
 });
 
+test('bomb blast remains 5x5 on boards with different dimensions', () => {
+  for (const [width, height] of [[7, 7], [15, 9], [35, 35]]) {
+    const board = game(width, height);
+    assert.equal(board.bombRadiusH, 2);
+    assert.equal(board.bombRadiusV, 2);
+    assert.equal(board.bombAreaCells(3, 3).length, 25);
+  }
+});
+
+test('small boards clip the fixed 5x5 blast without reducing its radius', () => {
+  const board = game(7, 7);
+  assert.deepEqual(Array.from(board.bombAreaCells(0, 0)), [0, 1, 2, 7, 8, 9, 14, 15, 16]);
+});
+
 test('bomb move reveals the same clipped area used for its preview', () => {
   const board = game();
   board.scores.red = 1;
@@ -35,32 +49,13 @@ test('bomb move reveals the same clipped area used for its preview', () => {
   assert.deepEqual(Array.from(result.cells), [0, 1, 2, 15, 16, 17, 30, 31, 32]);
 });
 
-test('bombBest selects the center with the most unrevealed mines', () => {
-  const board = new Game({ width: 7, height: 7, mineCount: 9, bombCount: 1 });
-  board.mines.fill(0);
-  for (const i of [16, 17, 18, 23, 24, 25, 30, 31, 32]) board.mines[i] = 1;
-  board.scores.red = 1;
+test('core has no AI helper that chooses a bomb center from the hidden mine map', () => {
+  const board = game();
 
-  const result = board.bombBest();
-
-  assert.equal(result.ok, true);
-  assert.deepEqual([result.x, result.y], [3, 3]);
-  assert.equal(result.mines, 9);
-  assert.equal(board.bombs.blue, 0);
+  assert.equal(board.bombBest, undefined);
 });
 
-test('bombBest uses row-major order for equally valuable regions', () => {
-  const board = new Game({ width: 7, height: 7, mineCount: 1, bombCount: 1 });
-  board.mines.fill(0);
-  board.scores.red = 1;
-
-  const result = board.bombBest();
-
-  assert.equal(result.ok, true);
-  assert.deepEqual([result.x, result.y], [0, 0]);
-});
-
-test('bombBest refuses to fire when bombing is illegal or AI bombs are disabled', () => {
+test('AI view exposes only public cell reads and AI-specific bomb permission', () => {
   const board = new Game({ width: 7, height: 7, mineCount: 1, bombCount: 1, disableAiBombs: true });
   board.scores.red = 1;
   const before = board.bombs.blue;
@@ -68,21 +63,25 @@ test('bombBest refuses to fire when bombing is illegal or AI bombs are disabled'
   assert.equal(board.canBomb('blue'), true);
   assert.equal(board.canBomb('blue', { ai: true }), false);
   assert.equal(board.view('blue').canBomb, true);
-  assert.equal(board.view('blue', { ai: true }).canBomb, false);
-  assert.equal(board.bombBest().ok, false);
-  assert.equal(board.bombs.blue, before);
-});
-
-test('AI view exposes only public cell reads and AI-specific bomb permission', () => {
-  const board = new Game({ width: 7, height: 7, mineCount: 9, bombCount: 1, disableAiBombs: true });
   const view = board.view('blue', { ai: true });
-
-  assert.equal(view.cellAt(0, 0), -2);
   assert.equal(view.canBomb, false);
+  assert.equal(view.cellAt(0, 0), -2);
   assert.equal(Object.hasOwn(view, 'mines'), false);
   assert.equal(Object.hasOwn(view, 'revealed'), false);
   assert.equal(Object.hasOwn(view, 'numbers'), false);
+  assert.equal(board.bombs.blue, before);
 });
+
+test('coordinate AI bomb actions execute the specified center', () => {
+  const board = game();
+  board.scores.red = 1;
+  const result = board.bomb(3, 3, { ai: true });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual([result.x, result.y], [3, 3]);
+  assert.equal(board.bombs.blue, 0);
+});
+
 
 test('bomb count is clamped to 0..999 and defaults to one', () => {
   assert.equal(new Game({ width: 7, height: 7, mineCount: 1 }).bombMax, 1);

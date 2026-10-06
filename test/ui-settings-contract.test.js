@@ -10,7 +10,7 @@ const css = fs.readFileSync('css/style.css', 'utf8');
 test('setup exposes bounded bomb inventory and session-only AI options', () => {
   assert.match(html, /id="cfgBombs"[^>]*max="999"/);
   assert.match(html, /id="cfgDisableAiBombs"/);
-  assert.match(html, /id="cfgEnhancedAI"[^>]*checked/);
+  assert.doesNotMatch(html, /cfgEnhancedAI|增强 AI/);
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
   assert.match(html, /id="cfgSpeed"/);
@@ -29,10 +29,32 @@ test('hint and cheat controls stay hidden until the secret sequence unlocks them
   assert.doesNotMatch(ui, /window\.__mine[\s\S]{0,180}get game\(/);
 });
 
-test('AI receives an AI-filtered public view and enhanced dispatch is explicit', () => {
-  assert.match(ui, /game\.view\(p,\s*\{\s*ai:\s*true\s*\}\)/);
-  assert.match(ui, /enhancedAI:\s*\$\('cfgEnhancedAI'\)\.checked/);
+test('AI receives a frozen shared public analysis and coordinate-only actions', () => {
+  assert.match(ui, /analysis:\s*shared\.analysis/);
+  assert.match(ui, /cellAt:\s*shared\.snapshot\.cellAt/);
+  assert.match(ui, /MineAIPlanner\.chooseFallback/);
+  assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
+  assert.doesNotMatch(ui, /game\.bombBest|bomb-auto|cfgEnhancedAI/);
+  assert.doesNotMatch(core, /bombBest\s*\(/);
   assert.match(core, /disableAiBombs/);
+
+  const coreScript = html.indexOf('<script src="js/core.js"></script>');
+  const plannerScript = html.indexOf('<script src="js/ai-planner.js"></script>');
+  const pluginScript = html.indexOf('<script src="plugin/ai-config.js"></script>');
+  const uiScript = html.indexOf('<script src="js/ui.js"></script>');
+  assert.ok(coreScript >= 0 && coreScript < plannerScript && plannerScript < pluginScript && pluginScript < uiScript);
+});
+
+test('AI snapshots public state before lazy load and rejects stale asynchronous decisions', () => {
+  const schedule = ui.slice(ui.indexOf('function scheduleAI()'), ui.indexOf('function recoverInvalidDecision'));
+  const snapshotAt = schedule.indexOf('scheduledShared = getSharedAnalysis()');
+  const firstLoadAt = schedule.indexOf('await aiRegistry.load(kind[p])');
+
+  assert.ok(snapshotAt >= 0 && firstLoadAt > snapshotAt);
+  assert.match(schedule, /const revisionAtSchedule = boardRevision/);
+  assert.match(schedule, /boardRevision !== revisionAtSchedule/);
+  assert.match(schedule, /if \(!isScheduledStateCurrent\(\)\) return;\s*if \(decide\) decision = decide\(scheduledView\)/);
+  assert.match(schedule, /getSharedAnalysis\(\)\.stateKey === scheduledShared\.stateKey/);
 });
 
 test('game-over announces the winning side and leaves the board available for review', () => {

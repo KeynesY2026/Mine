@@ -15,11 +15,12 @@ const label = p => (p === 'blue' ? '蓝方' : '红方');
 const other = p => (p === 'blue' ? 'red' : 'blue');
 
 let game = null;
+let boardRevision = 0;
 let kind = { blue: 'human', red: window.MineAIConfig?.defaultBySide?.red || 'human' };
 let speed = 6;
 let hintOn = false, cheatOn = false;
 let hintTogglePending = false;
-let probabilityLoad = null;
+let analysisCache = null;
 let bombPreviewCenter = null;
 let aiTimer = null;
 let timers = { blue: 0, red: 0 };               // AI 思考耗时 ms
@@ -66,24 +67,18 @@ function buildBoard() {
   }
   boardEl.appendChild(frag);
 }
-async function toggleHint() {
+function toggleHint() {
   if (!keySequence.isUnlocked() || hintTogglePending) return false;
   hintTogglePending = true;
   try {
-    if (!hintOn && typeof C.computeProbabilities !== 'function') {
-      if (!probabilityLoad) {
-        probabilityLoad = aiRegistry.load('global-probability').then(() => true).catch(() => false)
-          .finally(() => { probabilityLoad = null; });
-      }
-      if (!await probabilityLoad || typeof C.computeProbabilities !== 'function') {
-        toast('概率提示模块加载失败', true);
-        return false;
-      }
-    }
+    if (!hintOn) getSharedAnalysis();
     hintOn = !hintOn;
     $('btnHint').classList.toggle('on', hintOn);
     render();
     return true;
+  } catch (error) {
+    toast('概率分析失败: ' + error.message, true);
+    return false;
   } finally {
     hintTogglePending = false;
   }
@@ -108,12 +103,13 @@ function render() {
   document.body.classList.toggle('bombing', game.bombMode);
   const previewCells = game.bombMode && bombPreviewCenter
     ? new Set(game.bombAreaCells(bombPreviewCenter.x, bombPreviewCenter.y)) : null;
-  let probs = null;
+  let analysis = null;
   if (hintOn) {
-    try { probs = C.computeProbabilities(game.view('blue')); } catch (e) { probs = null; }
+    try { analysis = getSharedAnalysis().analysis; } catch (e) { analysis = null; }
   }
   for (let i = 0; i < game.total; i++) {
     const el = cellEl(i);
+    const x = i % game.w, y = Math.floor(i / game.w);
     if (!game.revealed[i]) {
       el.className = 'cell hidden' + (cheatOn && game.mines[i] ? ' cheat' : '')
         + (previewCells && previewCells.has(i) ? ' bomb-preview' : '')
@@ -124,11 +120,15 @@ function render() {
         cm.className = 'cheatmark';
         el.appendChild(cm);
       }
-      if (hintOn && probs && probs.has(i)) {
-        const hd = document.createElement('div');
-        hd.className = 'hintp';
-        hd.textContent = Math.round(probs.get(i) * 100) + '%';
-        el.appendChild(hd);
+      if (hintOn && analysis) {
+        const probability = analysis.mineProbabilityAt(x, y);
+        if (Number.isFinite(probability)) {
+          const hd = document.createElement('div');
+          hd.className = 'hintp';
+          hd.textContent = (analysis.quality === 'approximate' ? '≈' : '') + Math.round(probability * 100) + '%';
+          hd.title = analysis.quality === 'exact' ? '等权约束模型下的精确概率' : '近似概率；不表示确定安全或确定有雷';
+          el.appendChild(hd);
+        }
       }
       continue;
     }
@@ -196,9 +196,9 @@ function updateHUD() {
   bb.textContent = game.bombMode ? '💣 取消炸弹' : '💣 炸弹模式';
   $('bombGuide').classList.toggle('show', game.bombMode);
   $('bombGuide').textContent = game.bombMode
-    ? '炸弹范围最多 ' + (2 * game.bombRadiusH + 1) + '×' + (2 * game.bombRadiusV + 1) + '（边缘会裁切）· 移动鼠标预览 · 点击中心引爆 · 再点按钮取消 · 剩余 ' + game.bombs[game.turn] + ' 枚'
+    ? '炸弹范围固定 5×5（边缘会裁切）· 移动鼠标预览 · 点击中心引爆 · 再点按钮取消 · 剩余 ' + game.bombs[game.turn] + ' 枚'
     : '';
-  $('mineInfo').innerHTML = game.w + '×' + game.h + ' · 雷 <b>' + game.mineCount + '</b> · 胜线 <b>' + game.winNeed + '</b> · 炸弹 <b>' + (2 * game.bombRadiusH + 1) + '×' + (2 * game.bombRadiusV + 1) + '</b>';
+  $('mineInfo').innerHTML = game.w + '×' + game.h + ' · 雷 <b>' + game.mineCount + '</b> · 胜线 <b>' + game.winNeed + '</b> · 炸弹 <b>5×5</b>';
   $('rulesInfo').textContent = '点开雷 +1 并续回合 · 点开数字/0 格换回合 · 落后方可炸弹 · 剩雷 ' + game.remainMines;
   $('sessBlue').textContent = session.blue;
   $('sessRed').textContent = session.red;
@@ -222,6 +222,8 @@ function onCellClick(x, y) {
 }
 
 function afterMove(r, extraDelay) {
+  boardRevision++;
+  analysisCache = null;
   if (r.kind === 'bomb') bombPreviewCenter = null;
   render();
   // 涟漪动画: 洪水填充按距离延迟
@@ -249,8 +251,47 @@ function afterMove(r, extraDelay) {
 }
 
 /* ---------------- AI 调度 ---------------- */
-function makeView(p) {
-  return game.view(p, { ai: true });
+function getSharedAnalysis() {
+  if (!game) throw new Error('对局尚未开始');
+  const source = game.view('blue', { ai: true });
+  const values = Array.from({ length: game.total }, (_, i) => source.cellAt(i % game.w, Math.floor(i / game.w)));
+  const key = [game.w, game.h, game.mineCount, game.remainMines, values.join(',')].join('|');
+  const stateKey = [key, source.score, source.oppScore, source.bombs, source.turn, source.canBomb].join('|');
+  if (!analysisCache || analysisCache.key !== key) {
+    const frozenValues = Object.freeze(values);
+    const width = game.w, height = game.h;
+    const snapshot = Object.freeze({
+      width,
+      height,
+      mineCount: game.mineCount,
+      remainMines: game.remainMines,
+      cellAt(x, y) {
+        if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= width || y >= height) return -2;
+        return frozenValues[y * width + x];
+      },
+    });
+    analysisCache = { key, snapshot, analysis: MineAIPlanner.analyze(snapshot) };
+  }
+  return { ...analysisCache, stateKey };
+}
+
+function makeView(p, shared = getSharedAnalysis()) {
+  const source = game.view(p, { ai: true });
+  return Object.freeze({
+    width: source.width,
+    height: source.height,
+    score: source.score,
+    oppScore: source.oppScore,
+    mineCount: source.mineCount,
+    remainMines: source.remainMines,
+    bombs: source.bombs,
+    canBomb: source.canBomb,
+    bombRadiusH: source.bombRadiusH,
+    bombRadiusV: source.bombRadiusV,
+    turn: source.turn,
+    analysis: shared.analysis,
+    cellAt: shared.snapshot.cellAt,
+  });
 }
 
 function scheduleAI() {
@@ -265,24 +306,44 @@ function scheduleAI() {
   const delay = 100 + (10 - speed) * 200;
   const t0 = performance.now();
   const gameAtSchedule = game;
+  const revisionAtSchedule = boardRevision;
   aiTimer = setTimeout(async () => {
     if (!game || game !== gameAtSchedule || game.over || game.turn !== p) return;
+    let scheduledShared;
+    try {
+      scheduledShared = getSharedAnalysis();
+    } catch (error) {
+      console.error('共享概率分析失败', error);
+      toast('共享概率分析失败: ' + error.message, true);
+      return;
+    }
+    const scheduledView = makeView(p, scheduledShared);
+    const isScheduledStateCurrent = () => {
+      if (!game || game !== gameAtSchedule || game.over || game.turn !== p || boardRevision !== revisionAtSchedule) return false;
+      try { return getSharedAnalysis().stateKey === scheduledShared.stateKey; }
+      catch (error) {
+        console.error('共享概率分析失败', error);
+        return false;
+      }
+    };
     let decision = null;
     let decisionSourceFailed = false;
     try {
       const decide = await aiRegistry.load(kind[p]);
-      if (decide) decision = decide(makeView(p));
+      if (!isScheduledStateCurrent()) return;
+      if (decide) decision = decide(scheduledView);
     } catch (e) {
       decisionSourceFailed = true;
       console.error('AI 异常', e);
-      toast(label(p) + ' AI 异常: ' + e.message + '（降级随机）', true);
-      if (kind[p] !== aiRegistry.fallbackId && aiWorks(p)) {
+      toast(label(p) + ' AI 异常: ' + e.message + '（降级公开策略）', true);
+      if (kind[p] !== aiRegistry.fallbackId && aiWorks(p) && isScheduledStateCurrent()) {
         kind[p] = aiRegistry.fallbackId;
         updateHUD();
         try {
           const fallback = await aiRegistry.load(kind[p]);
+          if (!isScheduledStateCurrent()) return;
           if (fallback) {
-            decision = fallback(makeView(p));
+            decision = fallback(scheduledView);
             decisionSourceFailed = false;
           }
         } catch (fallbackError) {
@@ -290,12 +351,12 @@ function scheduleAI() {
         }
       }
     }
-    if (!game || game !== gameAtSchedule || game.over || game.turn !== p) return;
+    if (!isScheduledStateCurrent()) return;
+    const currentShared = getSharedAnalysis();
+    const currentView = makeView(p, currentShared);
+    const fallbackDecision = MineAIPlanner.chooseFallback(currentView, currentShared.analysis, C.randInt);
     timers[p] += performance.now() - t0;
-    const resolved = decisionGuard.resolve(game, p, decision, {
-      enhancedAI: $('cfgEnhancedAI').checked,
-      randomIndex: C.randInt,
-    });
+    const resolved = decisionGuard.resolve(game, p, decision, { fallbackDecision });
     if (resolved.noMoves) {
       toast('对局无处可走', true);
       return;
@@ -306,7 +367,9 @@ function scheduleAI() {
 }
 
 function recoverInvalidDecision(p) {
-  const retry = decisionGuard.resolve(game, p, null, { randomIndex: C.randInt });
+  const view = makeView(p);
+  const fallbackDecision = MineAIPlanner.chooseFallback(view, view.analysis, C.randInt);
+  const retry = decisionGuard.resolve(game, p, null, { fallbackDecision });
   if (retry.noMoves) {
     toast('对局无处可走', true);
     return;
@@ -319,8 +382,7 @@ function recoverInvalidDecision(p) {
 function applyDecision(p, decision) {
   if (!game || game.over || game.turn !== p || !decision) return;
   let result;
-  if (decision.type === 'bomb-auto') result = game.bombBest();
-  else if (decision.type === 'bomb') result = game.bomb(decision.x, decision.y, { ai: true });
+  if (decision.type === 'bomb') result = game.bomb(decision.x, decision.y, { ai: true });
   else if (decision.type === 'open') result = game.open(decision.x, decision.y);
   else result = { ok: false };
   if (result?.ok) afterMove(result);
@@ -354,6 +416,8 @@ function syncMineField() {
 
 function newGame() {
   clearTimeout(aiTimer);
+  boardRevision++;
+  analysisCache = null;
   $('dlgNewGame').close();
   const w = Math.round(C.clamp(+$('cfgW').value || 15, 7, 35));
   const h = Math.round(C.clamp(+$('cfgH').value || 15, 7, 35));
@@ -473,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 /* 调试句柄 (控制台/自动化用) */
 window.__mine = {
-  get view() { return game ? game.view('blue', { ai: true }) : null; },
+  get view() { return game ? makeView('blue') : null; },
   get hintOn() { return hintOn; },
   get cheatOn() { return cheatOn; },
 };

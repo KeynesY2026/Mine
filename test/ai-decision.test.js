@@ -3,12 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const context = {
-  window: { MineCore: { randInt: length => length - 1 } },
-  Math: Object.assign(Object.create(Math), { random: () => 0 }),
-};
-const source = fs.existsSync('js/ai-decision.js') ? fs.readFileSync('js/ai-decision.js', 'utf8') : '';
-vm.runInNewContext(source, context);
+const context = { window: { MineCore: { randInt: length => length - 1 } } };
+vm.runInNewContext(fs.readFileSync('js/ai-decision.js', 'utf8'), context);
 const resolve = context.window.MineAIDecision?.resolve;
 
 function game(revealed, canBomb = true) {
@@ -28,63 +24,67 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test('invalid opens fall back to a random legal unopened cell', () => {
-  assert.equal(typeof resolve, 'function', 'decision normalizer is available');
+const fallback = { type: 'open', x: 1, y: 1 };
+
+test('invalid opens use the supplied public-policy fallback instead of random hidden cells', () => {
   const result = resolve(game([1, 0, 1, 0]), 'red',
-    { type: 'open', x: 0, y: 0 }, { randomIndex: () => 1 });
+    { type: 'open', x: 0, y: 0 }, { fallbackDecision: fallback, randomIndex: () => 0 });
 
   assert.deepEqual(plain(result), {
-    action: { type: 'open', x: 1, y: 1 }, invalid: true, noMoves: false,
+    action: fallback, invalid: true, noMoves: false,
   });
 });
 
-test('default invalid-action fallback uses the core secure random index', () => {
-  const result = resolve(game([0, 0, 0, 0]), 'red', null);
+test('missing fallback uses deterministic legal open, not random all-hidden selection', () => {
+  const result = resolve(game([0, 0, 0, 0]), 'red', null,
+    { randomIndex: () => 3 });
 
   assert.deepEqual(plain(result), {
-    action: { type: 'open', x: 1, y: 1 }, invalid: true, noMoves: false,
+    action: { type: 'open', x: 0, y: 0 }, invalid: true, noMoves: false,
   });
 });
 
 test('out-of-range and already revealed opens are invalid', () => {
   const board = game([0, 1, 0, 1]);
-  assert.equal(resolve(board, 'red', { type: 'open', x: -1, y: 0 }, { randomIndex: () => 0 }).invalid, true);
-  assert.equal(resolve(board, 'red', { type: 'open', x: 1, y: 0 }, { randomIndex: () => 0 }).invalid, true);
+  assert.equal(resolve(board, 'red', { type: 'open', x: -1, y: 0 }, { fallbackDecision: fallback }).invalid, true);
+  assert.equal(resolve(board, 'red', { type: 'open', x: 1, y: 0 }, { fallbackDecision: fallback }).invalid, true);
 });
 
 test('no unopened cells do not produce a fallback move', () => {
   assert.deepEqual(plain(resolve(game([1, 1, 1, 1]), 'red', null,
-    { randomIndex: () => 0 })), { action: null, invalid: false, noMoves: true });
+    { fallbackDecision: fallback })), { action: null, invalid: false, noMoves: true });
 });
 
 test('bomb requests are rejected when the core denies AI bomb permission', () => {
   const result = resolve(game([0, 0, 0, 0], false), 'red',
-    { type: 'bomb', x: 0, y: 0 }, { randomIndex: () => 2 });
+    { type: 'bomb', x: 0, y: 0 }, { fallbackDecision: fallback });
 
   assert.deepEqual(plain(result), {
-    action: { type: 'open', x: 0, y: 1 }, invalid: true, noMoves: false,
+    action: fallback, invalid: true, noMoves: false,
   });
 });
 
-test('coordinate bombs remain coordinate actions when enhanced mode is off', () => {
+test('coordinate bombs stay coordinate actions regardless of legacy enhancement options', () => {
+  for (const enhancedAI of [false, true]) {
+    assert.deepEqual(plain(resolve(game([0, 0, 0, 0]), 'red',
+      { type: 'bomb', x: 1, y: 0 }, { enhancedAI })), {
+      action: { type: 'bomb', x: 1, y: 0 }, invalid: false, noMoves: false,
+    });
+  }
+});
+
+test('coordinate-free bomb-auto requests are rejected', () => {
   assert.deepEqual(plain(resolve(game([0, 0, 0, 0]), 'red',
-    { type: 'bomb', x: 1, y: 0 }, { enhancedAI: false })), {
-    action: { type: 'bomb', x: 1, y: 0 }, invalid: false, noMoves: false,
+    { type: 'bomb-auto' }, { fallbackDecision: fallback })), {
+    action: fallback, invalid: true, noMoves: false,
   });
 });
 
-test('enhanced bomb requests discard coordinates and become coordinate-free actions', () => {
-  assert.deepEqual(plain(resolve(game([0, 0, 0, 0]), 'red',
-    { type: 'bomb', x: 1, y: 0 }, { enhancedAI: true })), {
-    action: { type: 'bomb-auto' }, invalid: false, noMoves: false,
-  });
-});
-
-test('invalid bomb coordinates fall back to a legal open', () => {
+test('invalid bomb coordinates use the supplied public-policy fallback', () => {
   const result = resolve(game([0, 0, 0, 0]), 'red',
-    { type: 'bomb', x: 8, y: 0 }, { enhancedAI: false, randomIndex: () => 3 });
+    { type: 'bomb', x: 8, y: 0 }, { fallbackDecision: fallback });
 
   assert.deepEqual(plain(result), {
-    action: { type: 'open', x: 1, y: 1 }, invalid: true, noMoves: false,
+    action: fallback, invalid: true, noMoves: false,
   });
 });

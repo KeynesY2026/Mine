@@ -102,8 +102,8 @@ class Game {
     this.cfg = cfg;
     this.w = cfg.width; this.h = cfg.height; this.total = this.w * this.h;
     this.mineCount = cfg.mineCount;
-    this.bombRadiusH = Math.floor(this.w / 7);
-    this.bombRadiusV = Math.floor(this.h / 7);
+    this.bombRadiusH = 2;
+    this.bombRadiusV = 2;
     const requestedBombCount = cfg.bombCount === '' || cfg.bombCount == null ? NaN : Number(cfg.bombCount);
     this.bombMax = Number.isFinite(requestedBombCount) ? clamp(Math.trunc(requestedBombCount), 0, 999) : 1;
     this.disableAiBombs = !!cfg.disableAiBombs;
@@ -233,27 +233,6 @@ class Game {
     this._checkOver();
     this._emit(this.lastMove);
     return { ok: true, kind: 'bomb', x, y, mines: mineHit, cells };
-  }
-  bombBest() {
-    if (!this.canBomb(this.turn, { ai: true })) return { ok: false, why: 'cannot' };
-    let best = null;
-    let bestMines = -1;
-    let bestHidden = 0;
-    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) {
-      let mines = 0;
-      let hidden = 0;
-      for (const i of this.bombAreaCells(x, y)) {
-        if (this.revealed[i]) continue;
-        hidden++;
-        if (this.mines[i]) mines++;
-      }
-      if (mines > bestMines) {
-        bestMines = mines;
-        bestHidden = hidden;
-        best = { x, y };
-      }
-    }
-    return best && bestHidden > 0 ? this.bomb(best.x, best.y, { ai: true }) : { ok: false, why: 'no-target' };
   }
   // AI / 插件只读视图 (镜像 IChess, 额外 oppScore/bombs/turn)
   view(forPlayer, { ai = false } = {}) {
