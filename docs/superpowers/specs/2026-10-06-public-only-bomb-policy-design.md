@@ -51,7 +51,7 @@ The policy has no explicit opening/middle/late phase flags. Different unknown-re
 
 ## Endgame-region definition
 
-For exact public analysis, consider hidden cells with nonzero posterior mine probability. They form a public 8-neighbor graph. The single-region predicate is true when these cells form exactly one connected component and every hidden cell outside it has zero posterior mine probability. If the analysis is approximate or cannot establish this condition, do not assert the endgame exception; use the pre-endgame expected-yield rule.
+For exact public analysis, consider hidden cells with nonzero posterior mine probability. They form a public 8-neighbor graph. The single-region predicate is true only when there is at least one frontier constraint, these possible-mine cells form exactly one connected component, and every hidden cell outside it (including free cells) has zero posterior mine probability. Requiring a frontier constraint prevents the untouched opening board, where every cell is free, from being misclassified as the decisive single-region endgame. If analysis is approximate or cannot establish this condition, do not assert the endgame exception; use the pre-endgame expected-yield rule.
 
 ## Action and data flow
 
@@ -67,7 +67,7 @@ Use public-view fixtures and real planner/plugin execution where practical:
 
 1. **Large unknown region, far behind:** maximum public expected bomb yield is below `tieGap`; Invincible returns the highest-expected-yield coordinate bomb.
 2. **Different unknown-region size, same rule:** when expected yield reaches `tieGap` and the single-region condition is false, Invincible opens instead and conserves the bomb. No phase label is supplied to the plugin.
-3. **Single remaining public mine region:** AI is behind and legal to bomb; it returns a concrete coordinate selected by public endgame probability even if the ordinary expected-yield branch would conserve.
+3. **Single remaining public mine region:** Exact analysis has a frontier constraint, one 8-neighbor component of possible mine cells, and no possible mines outside it; AI is behind and legal to bomb, so it returns a concrete coordinate selected by public endgame probability even if the ordinary expected-yield branch would conserve.
 4. **Legality controls:** leading, no bomb, disabled AI bombs, or no hidden center never produce a bomb.
 5. **No hidden-map leakage:** two boards with identical public state but different actual mine layouts produce identical analyses and identical bomb decisions/coordinates.
 6. **Execution integration:** the selected coordinate is exactly the coordinate passed to `Game.bomb`; the engine's actual hit count is only observed after the move resolves.
