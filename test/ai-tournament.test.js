@@ -1,7 +1,95 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createSeededCrypto, createRuntime } = require('../scripts/ai-tournament-runtime');
 const { runTournament, summarizeTournament } = require('../scripts/ai-tournament-stats');
+const { parseArgs, runCli } = require('../scripts/ai-tournament');
+
+test('parseArgs normalizes tournament options and uses disjoint split defaults', () => {
+  assert.deepEqual(parseArgs([
+    '--opponent', 'both',
+    '--seed-start', '10',
+    '--seed-count', '20',
+    '--split', 'validation',
+  ]), {
+    opponent: 'both',
+    seedStart: 10,
+    seedCount: 20,
+    split: 'validation',
+    traceDir: null,
+    includeHiddenMap: false,
+    output: null,
+    help: false,
+  });
+  assert.equal(parseArgs([]).seedStart, 100000);
+  assert.equal(parseArgs(['--split', 'validation']).seedStart, 1000000000);
+  assert.equal(parseArgs(['--seed-start', '7', '--split', 'validation']).seedStart, 7);
+});
+
+test('parseArgs rejects invalid or incomplete options with readable errors', () => {
+  const invalidArguments = [
+    ['--seed-count', '0'],
+    ['--seed-start', '4294967296'],
+    ['--opponent', 'unknown'],
+    ['--seed-count'],
+    ['--unknown'],
+    ['--include-hidden-map'],
+    ['--seed-start', '4294967295', '--seed-count', '2'],
+  ];
+  for (const args of invalidArguments) {
+    assert.throws(() => parseArgs(args), Error, `arguments should be rejected: ${args.join(' ')}`);
+  }
+});
+
+test('--help returns usage without launching a tournament', () => {
+  const options = parseArgs(['--help']);
+  assert.equal(options.help, true);
+  const result = runCli(options);
+  assert.ok(result.help.includes('Usage: node scripts/ai-tournament.js'));
+});
+
+test('runCli writes aggregate JSON, public traces, and separate post-game hidden maps', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'minestorm-tournament-'));
+  const traceDir = path.join(directory, 'traces');
+  const output = path.join(directory, 'reports', 'summary.json');
+  try {
+    const report = runCli(parseArgs([
+      '--opponent', 'heuristic',
+      '--seed-start', '42',
+      '--seed-count', '1',
+      '--trace-dir', traceDir,
+      '--include-hidden-map',
+      '--output', output,
+    ]));
+    assert.equal(report.seedStart, 42);
+    assert.equal(report.seedCount, 1);
+    assert.deepEqual(report.config, { width: 15, height: 15, mineCount: 53, bombCount: 1 });
+    assert.equal(report.opponents.heuristic.summary.games, 2);
+    assert.equal(report.opponents.heuristic.seedClusters.length, 1);
+    assert.deepEqual(JSON.parse(fs.readFileSync(output, 'utf8')), report);
+
+    const traces = fs.readFileSync(path.join(traceDir, 'heuristic.jsonl'), 'utf8')
+      .trim().split('\n').map(line => JSON.parse(line));
+    const hiddenMaps = fs.readFileSync(path.join(traceDir, 'heuristic-hidden-maps.jsonl'), 'utf8')
+      .trim().split('\n').map(line => JSON.parse(line));
+    assert.equal(traces.length, 2);
+    assert.equal(hiddenMaps.length, 2);
+    for (const trace of traces) {
+      assert.ok(Array.isArray(trace.trace));
+      assert.equal(Object.hasOwn(trace, 'hiddenMap'), false);
+      assert.ok(trace.trace.every(entry => Object.hasOwn(entry, 'view') && !Object.hasOwn(entry, 'hiddenMap')));
+    }
+    for (const hiddenMap of hiddenMaps) {
+      assert.equal(hiddenMap.hiddenMap.length, 225);
+      assert.equal(hiddenMap.hiddenMap.reduce((count, mine) => count + mine, 0), 53);
+    }
+    assert.equal(traces[0].mapHash, traces[1].mapHash);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test('seeded crypto fills deterministic words and continues its sequence', () => {
   const first = createSeededCrypto(12345);
