@@ -185,6 +185,24 @@ test('Invincible does not request auto-bomb when no blast can physically reach t
   assert.equal(board.cellAt(action.x, action.y), -2);
 });
 
+test('Invincible requests a winning last bomb before opening a certain mine', () => {
+  const cells = Array(9).fill(0);
+  cells[0] = -2;
+  for (const i of [1, 3, 4]) cells[i] = 1;
+  const board = view(3, 3, cells, {
+    mineCount: 1, remainMines: 1, bombs: 1, canBomb: true,
+    score: 0, oppScore: 1, enhancedAI: true,
+  });
+
+  assert.equal(board.analysis.quality, 'exact');
+  assert.deepEqual(Array.from(board.analysis.certainMines), [0]);
+  const action = decide(board);
+
+  assert.equal(action.type, 'bomb-auto');
+  assert.equal(action.immediateWinOnly, true);
+  assert.deepEqual(action.fallback, { type: 'open', x: 0, y: 0 });
+});
+
 test('Invincible requests immediate-win-only auto-bomb despite deficit, coverage, and expected-yield gates', () => {
   const cells = Array(225).fill(-2);
   for (let cell = 0; cell < 41; cell++) cells[cell] = -1;

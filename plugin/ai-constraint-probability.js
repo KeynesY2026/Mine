@@ -48,15 +48,21 @@ function isAdjacentToRevealedMine(view, cell) {
   return false;
 }
 
+function chooseImmediateWinBomb(view, fallback) {
+  if (!view.canBomb || view.enhancedAI !== true || view.bombs !== 1) return null;
+  const minesNeededToWin = Math.floor(view.mineCount / 2) + 1 - view.score;
+  const candidates = view.analysis.bombCenters || [];
+  if (minesNeededToWin <= 0 ||
+      !candidates.some(candidate => candidate.hiddenCount >= minesNeededToWin)) return null;
+  return { type: 'bomb-auto', immediateWinOnly: true, fallback };
+}
+
 function chooseBomb(view, bestOpenMineProbability, fallback) {
+  const immediateWinBomb = chooseImmediateWinBomb(view, fallback);
+  if (immediateWinBomb) return immediateWinBomb;
   if (!view.canBomb || view.bombs <= 0) return null;
   const candidates = view.analysis.bombCenters || [];
   const winNeed = Math.floor(view.mineCount / 2) + 1;
-  const minesNeededToWin = winNeed - view.score;
-  if (view.enhancedAI === true && view.bombs === 1 && minesNeededToWin > 0 &&
-      candidates.some(candidate => candidate.hiddenCount >= minesNeededToWin)) {
-    return { type: 'bomb-auto', immediateWinOnly: true, fallback };
-  }
   if (view.oppScore - view.score < 4 || view.analysis.bombCoverageRatio(view.bombs) < 2 / 3) return null;
   let bestYield = -Infinity;
   let bestCenters = [];
@@ -82,7 +88,8 @@ function makeDecision(view) {
   if (!analysis || !Array.isArray(analysis.hiddenCells) || analysis.hiddenCells.length === 0) return null;
   if (analysis.quality === 'exact' && analysis.certainMines.length) {
     const mine = randomCell(analysis.certainMines);
-    return { type: 'open', x: mine % view.width, y: Math.floor(mine / view.width) };
+    const fallback = { type: 'open', x: mine % view.width, y: Math.floor(mine / view.width) };
+    return chooseImmediateWinBomb(view, fallback) || fallback;
   }
 
   const frontier = Array.from(analysis.frontierCells);
