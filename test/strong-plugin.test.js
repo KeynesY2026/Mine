@@ -210,6 +210,41 @@ test('direct-win override uses the configured cutoff and highest exact win proba
   }
 });
 
+test('generator-calibrated bomb ranking avoids the depleted move-83 region', () => {
+  const fixture = JSON.parse(fs.readFileSync('test/fixtures/invincible-local-density-move83.json', 'utf8'));
+  const state = fixture.publicView;
+  const board = view(state.width, state.height, state.publicBoard.flat(), {
+    score: state.score,
+    oppScore: state.oppScore,
+    mineCount: state.mineCount,
+    remainMines: state.remainMines,
+    bombs: state.bombs,
+    canBomb: state.canBomb,
+    turn: state.turn,
+  });
+  const depleted = fixture.retrospectiveOracle.depletedCenter;
+  const improved = fixture.retrospectiveOracle.improvedCenter;
+  const baseline = board.analysis.bombCenters.find(candidate => candidate.x === depleted.x && candidate.y === depleted.y);
+  const neededHits = Math.floor(state.mineCount / 2) + 1 - state.score;
+
+  assert.equal(board.analysis.quality, 'exact');
+  assert.equal(neededHits, 8);
+  assert.equal(baseline.expectedMines, fixture.uniformBaseline.expectedMines);
+  assert.equal(baseline.uniformHitCountProbabilities.slice(neededHits).reduce((sum, p) => sum + p, 0), fixture.uniformBaseline.directWinProbability);
+  assert.equal(depleted.actualHiddenHits, 0);
+  assert.equal(improved.actualHiddenHits, 5);
+  randomIndex(0);
+  setBombThreshold(0.5);
+  try {
+    const action = decide(board);
+    assert.equal(action.type, 'bomb');
+    assert.deepEqual({ x: action.x, y: action.y }, { x: improved.x, y: improved.y });
+    assert.ok(improved.actualHiddenHits > depleted.actualHiddenHits);
+  } finally {
+    setBombThreshold(null);
+  }
+});
+
 test('opening position with zero direct-win probability conserves the last bomb', () => {
   const cells = Array(225).fill(-2);
   cells[112] = 2;

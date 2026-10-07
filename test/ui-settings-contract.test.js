@@ -20,15 +20,30 @@ test('setup exposes bounded bomb inventory and the public-only AI bomb policy', 
   assert.doesNotMatch(ui, /localStorage|sessionStorage/);
 });
 
-test('hint and cheat controls stay hidden until the secret sequence unlocks them', () => {
+test('hint, cheat, and export controls stay hidden until the secret sequence unlocks them', () => {
   assert.match(html, /id="btnHint"[^>]*hidden/);
   assert.match(html, /id="btnCheat"[^>]*hidden/);
+  assert.match(html, /id="btnExportLog"[^>]*hidden/);
   assert.match(ui, /keySequence\.push\(e\.key/);
   assert.match(ui, /keySequence\.isUnlocked\(\)/);
   assert.match(ui, /toggleHint\(\)[\s\S]{0,180}isUnlocked\(\)/);
   assert.doesNotMatch(ui, /setCheat\s*\(/);
   assert.match(ui, /window\.__mine = \{\s*get view\(\)/);
   assert.doesNotMatch(ui, /window\.__mine[\s\S]{0,180}get game\(/);
+  assert.match(ui, /\$\('btnExportLog'\)\.hidden = !cheatOn/);
+  assert.match(ui, /function exportDiagnosticLog\(\)[\s\S]{0,180}if \(!cheatOn \|\| !game \|\| !gameLog\)/);
+});
+
+test('diagnostic JSON is built from move history and the actual mine map without network upload', () => {
+  assert.match(html, /id="btnExportLog"[^>]*>导出分析日志/);
+  assert.match(html, /<script src="js\/diagnostic-log\.js"><\/script>/);
+  assert.match(ui, /MineDiagnosticLog\.createGameLog\([\s\S]{0,350}actualMineMap:\s*Array\.from\(game\.mines\)/);
+  assert.match(ui, /MineDiagnosticLog\.recordMove\(gameLog/);
+  assert.match(ui, /recordDiagnosticMove\(\{ player, agent: 'human', before,/);
+  assert.match(ui, /agent: agentAtSchedule,[\s\S]{0,100}fallbackAgent:/);
+  assert.match(ui, /MineDiagnosticLog\.createExportDocument/);
+  assert.match(ui, /URL\.createObjectURL\(blob\)/);
+  assert.doesNotMatch(ui, /fetch\s*\(|XMLHttpRequest/);
 });
 
 test('AI receives a frozen shared public analysis and routes coordinate bombs directly', () => {
@@ -44,14 +59,15 @@ test('AI receives a frozen shared public analysis and routes coordinate bombs di
   assert.doesNotMatch(ui, /bombBest|bomb-auto|immediateWinOnly/);
   assert.doesNotMatch(core, /bombBest\s*\(/);
   assert.match(core, /disableAiBombs/);
-  const applyDecision = ui.match(/function applyDecision\(p, action\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  const applyDecision = ui.match(/function applyDecision\(p, action, diagnostic = \{\}\) \{([\s\S]*?)\n\}/)?.[1] || '';
   assert.match(applyDecision, /game\.bomb\(action\.x, action\.y, \{ ai: true \}\)/);
 
   const coreScript = html.indexOf('<script src="js/core.js"></script>');
   const plannerScript = html.indexOf('<script src="js/ai-planner.js"></script>');
   const pluginScript = html.indexOf('<script src="plugin/ai-config.js"></script>');
+  const diagnosticScript = html.indexOf('<script src="js/diagnostic-log.js"></script>');
   const uiScript = html.indexOf('<script src="js/ui.js"></script>');
-  assert.ok(coreScript >= 0 && coreScript < plannerScript && plannerScript < pluginScript && pluginScript < uiScript);
+  assert.ok(coreScript >= 0 && coreScript < plannerScript && plannerScript < pluginScript && pluginScript < diagnosticScript && diagnosticScript < uiScript);
 });
 
 test('AI snapshots public state before lazy load and rejects stale asynchronous decisions', () => {

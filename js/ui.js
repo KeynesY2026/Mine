@@ -8,13 +8,14 @@ const C = MineCore;
 const aiRegistry = MineAIRegistry.create(C, window.MineAIConfig);
 const decisionGuard = MineAIDecision;
 const gameSettings = MineGameSettings;
-const keySequence = MineKeySequence.create('keynesy', 1500);
+const keySequence = MineKeySequence.create('cheat', 1500);
 const $ = id => document.getElementById(id);
 const victoryCelebration = MineVictoryCelebration.create($('victoryFireworks'), $('winnerMessage'));
 const label = p => (p === 'blue' ? '蓝方' : '红方');
 const other = p => (p === 'blue' ? 'red' : 'blue');
 
 let game = null;
+let gameLog = null;
 let boardRevision = 0;
 let kind = { blue: 'human', red: window.MineAIConfig?.defaultBySide?.red || 'human' };
 let speed = 6;
@@ -210,16 +211,41 @@ function isAI(p) { return kind[p] !== 'human'; }
 function aiWorks(p) {
   return kind[p] !== 'human' && !!aiRegistry.get(kind[p]);
 }
+function diagnosticThreshold() {
+  const threshold = window.MineAIConfig?.bombWinProbabilityThreshold;
+  return Number.isFinite(threshold) ? threshold : null;
+}
+function diagnosticGameState() {
+  return {
+    scores: { blue: game.scores.blue, red: game.scores.red },
+    bombs: { blue: game.bombs.blue, red: game.bombs.red },
+    remainMines: game.remainMines,
+    turn: game.turn,
+    over: game.over,
+    winner: game.winner,
+  };
+}
+function recordDiagnosticMove(move) {
+  if (!gameLog) return;
+  try {
+    MineDiagnosticLog.recordMove(gameLog, { ...move, after: diagnosticGameState() });
+  } catch (error) {
+    console.error('诊断日志记录失败', error);
+  }
+}
 
 /* ---------------- 交互 ---------------- */
 function onCellClick(x, y) {
   if (!game || game.over) return;
   if (isAI(game.turn)) { toast('AI 回合中', true); return; }
-  let r;
-  if (game.bombMode) r = game.bomb(x, y);
-  else r = game.open(x, y);
-  if (r.ok) afterMove(r);
-  else if (r.why === 'center-not-hidden') toast('炸弹中心必须选择未翻开的格子', true);
+  const player = game.turn;
+  const action = game.bombMode ? { type: 'bomb', x, y } : { type: 'open', x, y };
+  const before = MineDiagnosticLog.captureView(game.view(player, { ai: true }), diagnosticThreshold());
+  const r = action.type === 'bomb' ? game.bomb(x, y) : game.open(x, y);
+  if (r.ok) {
+    recordDiagnosticMove({ player, agent: 'human', before, requestedAction: action, executedAction: action, result: r });
+    afterMove(r);
+  } else if (r.why === 'center-not-hidden') toast('炸弹中心必须选择未翻开的格子', true);
 }
 
 function afterMove(r, extraDelay) {
@@ -314,6 +340,7 @@ function scheduleAI() {
     kind[p] = aiRegistry.fallbackId;
     updateHUD();
   }
+  const agentAtSchedule = kind[p];
   const delay = 100 + (10 - speed) * 200;
   const t0 = performance.now();
   const gameAtSchedule = game;
@@ -329,6 +356,7 @@ function scheduleAI() {
       return;
     }
     const scheduledView = makeView(p, scheduledShared);
+    const diagnosticBefore = MineDiagnosticLog.captureView(scheduledView, diagnosticThreshold());
     const isScheduledStateCurrent = () => {
       if (!game || game !== gameAtSchedule || game.over || game.turn !== p || boardRevision !== revisionAtSchedule) return false;
       try { return getSharedAnalysis().stateKey === scheduledShared.stateKey; }
@@ -339,12 +367,14 @@ function scheduleAI() {
     };
     let decision = null;
     let decisionSourceFailed = false;
+    let decisionError = null;
     try {
       const decide = await aiRegistry.load(kind[p]);
       if (!isScheduledStateCurrent()) return;
       if (decide) decision = decide(scheduledView);
     } catch (e) {
       decisionSourceFailed = true;
+      decisionError = e?.message || String(e);
       console.error('AI 异常', e);
       toast(label(p) + ' AI 异常: ' + e.message + '（降级公开策略）', true);
       if (kind[p] !== aiRegistry.fallbackId && aiWorks(p) && isScheduledStateCurrent()) {
@@ -358,6 +388,7 @@ function scheduleAI() {
             decisionSourceFailed = false;
           }
         } catch (fallbackError) {
+          decisionError = fallbackError?.message || String(fallbackError);
           console.error('默认 AI 加载失败', fallbackError);
         }
       }
@@ -373,12 +404,21 @@ function scheduleAI() {
       return;
     }
     if (resolved.invalid && !decisionSourceFailed) toast('AI 走昏招了！', true, true);
-    applyDecision(p, resolved.action);
+    applyDecision(p, resolved.action, {
+      before: diagnosticBefore,
+      agent: agentAtSchedule,
+      fallbackAgent: kind[p] === agentAtSchedule ? null : kind[p],
+      requestedAction: decision,
+      invalid: resolved.invalid,
+      decisionSourceFailed,
+      decisionError,
+    });
   }, delay);
 }
 
 function recoverInvalidDecision(p) {
   const view = makeView(p);
+  const before = MineDiagnosticLog.captureView(view, diagnosticThreshold());
   const fallbackDecision = MineAIPlanner.chooseFallback(view, view.analysis, C.randInt);
   const retry = decisionGuard.resolve(game, p, null, { fallbackDecision });
   if (retry.noMoves) {
@@ -386,16 +426,31 @@ function recoverInvalidDecision(p) {
     return;
   }
   const result = game.open(retry.action.x, retry.action.y);
+  recordDiagnosticMove({
+    player: p, agent: kind[p], before, requestedAction: null, executedAction: retry.action,
+    invalid: false, decisionSourceFailed: false, decisionError: 'legal fallback after rejected action', result,
+  });
   if (result.ok) afterMove(result);
   else toast(label(p) + ' 无合法走法', true);
 }
 
-function applyDecision(p, action) {
+function applyDecision(p, action, diagnostic = {}) {
   if (!game || game.over || game.turn !== p || !action) return;
+  const before = diagnostic.before || MineDiagnosticLog.captureView(makeView(p), diagnosticThreshold());
   let result;
   if (action.type === 'bomb') result = game.bomb(action.x, action.y, { ai: true });
   else if (action.type === 'open') result = game.open(action.x, action.y);
   else result = { ok: false };
+  recordDiagnosticMove({
+    player: p, agent: diagnostic.agent || kind[p], fallbackAgent: diagnostic.fallbackAgent,
+    before,
+    requestedAction: diagnostic.requestedAction,
+    executedAction: action,
+    invalid: diagnostic.invalid,
+    decisionSourceFailed: diagnostic.decisionSourceFailed,
+    decisionError: diagnostic.decisionError,
+    result,
+  });
   if (result?.ok) afterMove(result);
   else {
     toast('AI 走昏招了！', true, true);
@@ -412,6 +467,32 @@ function onGameOver() {
   updateHUD();
   if (game.winner === 'draw') toast('本局平局', false, false, 2000);
   else victoryCelebration.start(label(game.winner) + '获胜！');
+}
+
+function exportDiagnosticLog() {
+  if (!cheatOn || !game || !gameLog) {
+    toast('请先开启作弊模式再导出日志', true);
+    return false;
+  }
+  try {
+    const exportedAt = new Date().toISOString();
+    const report = MineDiagnosticLog.createExportDocument(gameLog, diagnosticGameState(), exportedAt);
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = 'minestorm-debug-' + exportedAt.replace(/[:.]/g, '-') + '.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    toast('分析日志已下载（含本局雷图）');
+    return true;
+  } catch (error) {
+    console.error('诊断日志导出失败', error);
+    toast('诊断日志导出失败: ' + error.message, true);
+    return false;
+  }
 }
 
 /* ---------------- 新对局 / 设置 ---------------- */
@@ -448,6 +529,7 @@ function newGame() {
   bombPreviewCenter = null;
   $('btnHint').classList.remove('on');
   $('btnCheat').classList.remove('on');
+  $('btnExportLog').hidden = true;
   document.body.classList.remove('bombing');
   game = new C.Game({
     width: w,
@@ -455,6 +537,20 @@ function newGame() {
     mineCount: m,
     bombCount: bombs,
     disableAiBombs: $('cfgDisableAiBombs').checked,
+  });
+  gameLog = MineDiagnosticLog.createGameLog({
+    startedAt: new Date().toISOString(),
+    width: w,
+    height: h,
+    settings: {
+      mineCount: m,
+      bombCount: bombs,
+      disableAiBombs: $('cfgDisableAiBombs').checked,
+      aiSpeed: speed,
+      bombWinProbabilityThreshold: diagnosticThreshold(),
+    },
+    aiBySide: { blue: kind.blue, red: kind.red },
+    actualMineMap: Array.from(game.mines),
   });
   buildBoard();
   render();
@@ -503,8 +599,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!keySequence.isUnlocked()) return;
     cheatOn = !cheatOn;
     $('btnCheat').classList.toggle('on', cheatOn);
+    $('btnExportLog').hidden = !cheatOn;
     render();
   });
+  $('btnExportLog').addEventListener('click', exportDiagnosticLog);
   window.addEventListener('keydown', e => {
     if (keySequence.push(e.key, Date.now(), e)) {
       $('btnHint').hidden = false;
