@@ -252,13 +252,19 @@ function afterMove(r, extraDelay) {
 }
 
 /* ---------------- AI 调度 ---------------- */
-function getSharedAnalysis() {
+function getSharedAnalysis(player = game?.turn) {
   if (!game) throw new Error('对局尚未开始');
   const source = game.view('blue', { ai: true });
+  const playerSource = game.view(player, { ai: true });
+  const threshold = window.MineAIConfig?.bombWinProbabilityThreshold;
+  const includeJointHitDistributions = isAI(player) && kind[player] === 'constraint-probability'
+    && Number.isFinite(threshold) && threshold > 0 && threshold <= 1
+    && playerSource.canBomb && playerSource.bombs > 0;
   const values = Array.from({ length: game.total }, (_, i) => source.cellAt(i % game.w, Math.floor(i / game.w)));
   const key = [game.w, game.h, game.mineCount, game.remainMines, values.join(',')].join('|');
   const stateKey = [key, source.score, source.oppScore, source.bombs, source.turn, source.canBomb].join('|');
-  if (!analysisCache || analysisCache.key !== key) {
+  const cacheKey = `${key}|joint:${includeJointHitDistributions}`;
+  if (!analysisCache || analysisCache.key !== cacheKey) {
     const frozenValues = Object.freeze(values);
     const width = game.w, height = game.h;
     const snapshot = Object.freeze({
@@ -271,12 +277,16 @@ function getSharedAnalysis() {
         return frozenValues[y * width + x];
       },
     });
-    analysisCache = { key, snapshot, analysis: MineAIPlanner.analyze(snapshot) };
+    analysisCache = {
+      key: cacheKey,
+      snapshot,
+      analysis: MineAIPlanner.analyze(snapshot, { includeJointHitDistributions }),
+    };
   }
   return { ...analysisCache, stateKey };
 }
 
-function makeView(p, shared = getSharedAnalysis()) {
+function makeView(p, shared = getSharedAnalysis(p)) {
   const source = game.view(p, { ai: true });
   return Object.freeze({
     width: source.width,

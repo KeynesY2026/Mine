@@ -1,10 +1,25 @@
 # MineStorm AI development baseline
 
-**Status:** The strict baseline and corrected paired final-bomb direct-win experiment below are historical. The unified public-only coordinate-bomb treatment is documented first. All new treatment matches passed strict decision validation, pairing checks, and the bounded replay audit. Public hit-count and win estimates are approximate, not win guarantees.
+**Status:** The current production strategy and its paired evidence are summarized first; the original baseline, corrected final-bomb experiment, and first-generation public-only treatment below are historical. The current joint-model results, artifacts, and limitations are documented in [`2026-10-06-joint-bomb-win-probability.md`](2026-10-06-joint-bomb-win-probability.md). All reported tournament games passed strict decision validation and seed/map pairing checks. `P_uniform` is a public model estimate, not a posterior guarantee under the actual map generator.
 
-## Unified public-only coordinate-bomb policy (paired follow-up)
+## Current joint public bomb-win policy
 
-The engine-side hidden selector and `bomb-auto` route have been removed. Invincible now commits to a concrete hidden-cell coordinate selected only from the shared public analysis and public score state. When the exact analysis identifies a single possible mine region, it ranks candidate blasts by the public marginal estimate of reaching the win line. Otherwise it chooses the highest public expected-yield blast only when that expected yield is below the current score gap, and conserves the bomb when the expected yield could meet or exceed that gap. `cfgDisableAiBombs`, engine legality, and ordinary `Game.bomb(x, y)` resolution remain in force. Probability-derived hit-count and win estimates are approximate and are not actual-win guarantees; actual hits are resolved only after the coordinate is chosen.
+Invincible uses an exact joint hit-count distribution under uniformly weighted public-consistent layouts to estimate whether each legal coordinate bomb reaches the 27-point win line. A direct-win override fires at the empirically selected production cutoff `0.5`; otherwise the existing expected-yield/comeback fallback remains. Joint distributions are requested only when Invincible can legally bomb and has inventory. Hidden-map bomb selection, `singlePossibleMineRegion`, and independent-marginal hit-count estimates are absent. Omitted runtime/CLI thresholds inherit `plugin/ai-config.js`; explicit `null`/`off` is the tournament control. The high-level implementation and validation details are in the linked report.
+
+### Held-out paired results (selected cutoff 0.5)
+
+Each opponent was tested on `1000` disjoint held-out seed clusters, both Invincible seats (`2000` games/opponent), with identical treatment/control maps and no errors. Paired intervals resample seed clusters (`20,000` deterministic replicates); the combined analysis averages the two opponents per shared seed before resampling.
+
+| Opponent | Win rate off → 0.5 | Paired win-point delta (95% CI) | Mean score margin off → 0.5; paired delta (95% CI) | Bombs used / games | Direct override / direct wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Simple (`heuristic`) | 60.4% → 62.5% | +2.10 pp (+1.45,+2.80) | 2.7445 → 2.8455; +0.101 (+0.0695,+0.134) | 919/2000 (45.95%) | 79 / 54 |
+| Medium (`global-probability`) | 71.0% → 73.6% | +2.60 pp (+1.90,+3.35) | 5.656 → 5.777; +0.121 (+0.090,+0.155) | 562/2000 (28.10%) | 88 / 58 |
+
+Equal-opponent paired win-point delta is `+2.35 pp` (95% CI `+1.85,+2.85`); margin delta is `+0.111` (`+0.08825,+0.13425`). Both opponents have positive point estimates and intervals. At selected bomb actions, `P_uniform` forecasts averaged `0.06401` Simple / `0.11885` Medium; realized direct wins were `6.17%` (54/875) / `10.65%` (59/554), with Brier scores `0.01601` / `0.02721`. For `P_uniform ≥ 0.9`, direct wins were 16/16 Simple and 22/22 Medium. These are selected action outcomes, not a general calibration posterior; see the linked report for bins and development selection.
+
+## Historical first-generation public-only coordinate-bomb policy (superseded)
+
+The engine-side hidden selector and `bomb-auto` route had been removed. That version used a `singlePossibleMineRegion` branch and independent-marginal hit estimates; those policy details are superseded by the current joint model above. Engine legality and ordinary `Game.bomb(x, y)` resolution remained in force. Historical metrics and replay audit follow.
 
 ### Method and pairing
 

@@ -74,7 +74,9 @@ function publicDecisionView(board) {
     bombRadiusV: source.bombRadiusV,
     turn: source.turn,
     cellAt: snapshot.cellAt,
-    analysis: sandbox.window.MineAIPlanner.analyze(snapshot),
+    analysis: sandbox.window.MineAIPlanner.analyze(snapshot, {
+      includeJointHitDistributions: source.canBomb && source.bombs > 0,
+    }),
   });
 }
 
@@ -118,9 +120,9 @@ test('public-only Invincible bombs use identical coordinates, not hidden auto-se
   assert.equal(rightView.analysis.quality, 'exact');
   assert.deepEqual(
     Array.from(leftView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines, item.hiddenCount,
-      Array.from(item.estimatedHitCountProbabilities)]),
+      Array.from(item.uniformHitCountProbabilities)]),
     Array.from(rightView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines, item.hiddenCount,
-      Array.from(item.estimatedHitCountProbabilities)]),
+      Array.from(item.uniformHitCountProbabilities)]),
   );
 
   const maximumExpectedYield = Math.max(...leftView.analysis.bombCenters.map(center => center.expectedMines));

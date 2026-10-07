@@ -1,6 +1,8 @@
 "use strict";
 
 window.MineAIConfig = {
+  // Held-out paired-seed validation: cutoff .5 improved both benchmark opponents.
+  bombWinProbabilityThreshold: 0.5,
   defaultBySide: {
     blue: 'human',
     red: 'constraint-probability',

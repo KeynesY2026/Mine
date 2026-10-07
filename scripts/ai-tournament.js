@@ -12,6 +12,7 @@ const DEFAULTS = {
   traceDir: null,
   includeHiddenMap: false,
   output: null,
+  bombWinProbabilityThreshold: undefined,
   help: false,
 };
 const SPLIT_SEED_START = {
@@ -29,6 +30,7 @@ Options:
   --trace-dir PATH                              Write one public JSONL trace per opponent
   --include-hidden-map                          Write separate post-game hidden-map JSONL files
   --output PATH                                 Write the machine-readable JSON summary
+  --bomb-win-probability-threshold off|N       Require this public win probability for override (default: production config)
   --help                                        Show this help
 
 Default seed starts: dev 100000; validation 1000000000.
@@ -39,6 +41,18 @@ function parseInteger(value, flag) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) throw new Error(`${flag} must be a safe integer`);
   return parsed;
+}
+
+function parseBombWinThreshold(value) {
+  if (value === 'off') return null;
+  if (!/^(?:0?\.\d+|1(?:\.0+)?)$/.test(value)) {
+    throw new Error('--bomb-win-probability-threshold must be "off" or a number in (0, 1]');
+  }
+  const threshold = Number(value);
+  if (!(threshold > 0 && threshold <= 1)) {
+    throw new Error('--bomb-win-probability-threshold must be "off" or a number in (0, 1]');
+  }
+  return threshold;
 }
 
 function validateOptions(options) {
@@ -62,6 +76,11 @@ function validateOptions(options) {
   }
   if (options.output !== null && (typeof options.output !== 'string' || options.output.trim() === '')) {
     throw new Error('--output requires a non-empty path');
+  }
+  if (options.bombWinProbabilityThreshold !== undefined && options.bombWinProbabilityThreshold !== null
+    && (!Number.isFinite(options.bombWinProbabilityThreshold)
+      || options.bombWinProbabilityThreshold <= 0 || options.bombWinProbabilityThreshold > 1)) {
+    throw new Error('--bomb-win-probability-threshold must be "off" or a number in (0, 1]');
   }
   if (options.includeHiddenMap && !options.traceDir) {
     throw new Error('--include-hidden-map requires --trace-dir');
@@ -118,6 +137,9 @@ function parseArgs(argv) {
         options.output = valueFor();
         if (options.output.trim() === '') throw new Error('--output requires a non-empty path');
         break;
+      case '--bomb-win-probability-threshold':
+        options.bombWinProbabilityThreshold = parseBombWinThreshold(valueFor());
+        break;
       default:
         throw new Error(`Unknown option: ${flag}`);
     }
@@ -150,6 +172,7 @@ function runCli(options) {
     split: options.split,
     seedStart: options.seedStart,
     seedCount: options.seedCount,
+    bombWinProbabilityThreshold: options.bombWinProbabilityThreshold,
     config: { width: 15, height: 15, mineCount: 53, bombCount: 1 },
     opponents: {},
   };
@@ -161,6 +184,7 @@ function runCli(options) {
       seedStart: options.seedStart,
       seedCount: options.seedCount,
       ...report.config,
+      bombWinProbabilityThreshold: options.bombWinProbabilityThreshold,
       includeTrace: Boolean(options.traceDir),
       includeHiddenMap: options.includeHiddenMap,
     });
@@ -181,6 +205,11 @@ function runCli(options) {
       result.summary = summarizeTournament(tournament.seedClusters, {
         bootstrapSeed: options.seedStart,
       });
+    }
+    if (report.bombWinProbabilityThreshold === undefined) {
+      report.bombWinProbabilityThreshold = tournament.bombWinProbabilityThreshold;
+    } else if (report.bombWinProbabilityThreshold !== tournament.bombWinProbabilityThreshold) {
+      throw new Error('Tournament opponents resolved different bomb win probability thresholds');
     }
     report.opponents[opponentId] = result;
 
@@ -220,6 +249,7 @@ function consoleReport(report) {
     split: report.split,
     seedStart: report.seedStart,
     seedCount: report.seedCount,
+    bombWinProbabilityThreshold: report.bombWinProbabilityThreshold,
     opponents: Object.fromEntries(Object.entries(report.opponents).map(([id, result]) => [
       id,
       result.incomplete ? { incomplete: result.incomplete } : result.summary,

@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 let makeDecision = null;
 const sandbox = {
-  window: {},
+  window: { MineAIConfig: { bombWinProbabilityThreshold: null } },
   crypto: { getRandomValues(array) { array[0] = 0; return array; } },
 };
 vm.createContext(sandbox);
@@ -34,7 +34,9 @@ function view(width, height, cells, overrides = {}) {
   const values = Int8Array.from(cells);
   const state = { ...defaults, ...overrides };
   state.cellAt = (x, y) => x < 0 || y < 0 || x >= width || y >= height ? -2 : values[y * width + x];
-  state.analysis = sandbox.window.MineAIPlanner.analyze(state);
+  state.analysis = sandbox.window.MineAIPlanner.analyze(state, {
+    includeJointHitDistributions: state.canBomb && state.bombs > 0,
+  });
   return state;
 }
 
@@ -45,6 +47,10 @@ function decide(board) {
 
 function randomIndex(index) {
   sandbox.window.MineCore.randInt = length => Math.min(index, length - 1);
+}
+
+function setBombThreshold(value) {
+  sandbox.window.MineAIConfig.bombWinProbabilityThreshold = value;
 }
 
 test('Invincible opens an exactly proven mine before ordinary candidates', () => {
@@ -120,7 +126,6 @@ test('Invincible spends when maximum expected blast yield cannot tie, otherwise 
   });
   randomIndex(0);
   const maximum = Math.max(...desperate.analysis.bombCenters.map(candidate => candidate.expectedMines));
-  assert.equal(desperate.analysis.singlePossibleMineRegion, false);
   assert.ok(maximum < desperate.oppScore - desperate.score);
   const action = decide(desperate);
   const best = desperate.analysis.bombCenters.find(candidate => candidate.expectedMines === maximum);
@@ -139,19 +144,18 @@ test('Invincible spends when maximum expected blast yield cannot tie, otherwise 
   });
   boundary.analysis = {
     ...boundary.analysis,
-    singlePossibleMineRegion: false,
-    bombCenters: [{ x: 1, y: 0, hiddenCount: 1, expectedMines: 1, estimatedHitCountProbabilities: [0, 1] }],
+    bombCenters: [{ x: 1, y: 0, hiddenCount: 1, expectedMines: 1, uniformHitCountProbabilities: [0, 1] }],
   };
   assert.equal(decide(boundary).type, 'open');
 
   const noCenters = view(3, 2, Array(6).fill(-2), {
     mineCount: 1, remainMines: 1, bombs: 1, canBomb: true, score: 0, oppScore: 2,
   });
-  noCenters.analysis = { ...noCenters.analysis, singlePossibleMineRegion: false, bombCenters: [] };
+  noCenters.analysis = { ...noCenters.analysis, bombCenters: [] };
   assert.equal(decide(noCenters).type, 'open');
 });
 
-test('Invincible uses a legal last-region bomb and selects the best public win estimate', () => {
+test('a certain direct-win blast overrides the ordinary expected-yield conservation rule', () => {
   const width = 7, height = 7;
   const hidden = [23, 24, 25];
   const captured = [0, 48];
@@ -168,38 +172,63 @@ test('Invincible uses a legal last-region bomb and selects the best public win e
     }
     cells[index] = adjacent;
   }
-  const certainRegion = view(width, height, cells, {
+  const board = view(width, height, cells, {
     mineCount: 5, remainMines: 3, bombs: 1, canBomb: true, score: 0, oppScore: 2,
   });
-  assert.equal(certainRegion.analysis.quality, 'exact');
-  assert.equal(certainRegion.analysis.singlePossibleMineRegion, true);
-  assert.deepEqual(Array.from(certainRegion.analysis.hiddenCells), hidden);
-  const action = decide(certainRegion);
-  const selected = certainRegion.analysis.bombCenters.find(candidate => candidate.x === action.x && candidate.y === action.y);
-  assert.equal(action.type, 'bomb');
-  assert.equal(selected.estimatedHitCountProbabilities[3], 1);
+  assert.equal(board.analysis.quality, 'exact');
+  assert.deepEqual(Array.from(board.analysis.hiddenCells), hidden);
+  assert.equal(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)), 3);
+  assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) >= board.oppScore - board.score);
+  setBombThreshold(1);
+  try {
+    const action = decide(board);
+    assert.equal(action.type, 'bomb');
+    const selected = board.analysis.bombCenters.find(candidate => candidate.x === action.x && candidate.y === action.y);
+    assert.equal(selected.uniformHitCountProbabilities[3], 1);
+  } finally {
+    setBombThreshold(null);
+  }
+});
 
-  const estimated = view(3, 2, Array(6).fill(-2), {
-    mineCount: 5, remainMines: 5, bombs: 1, canBomb: true, score: 1, oppScore: 2,
+test('direct-win override uses the configured cutoff and highest exact win probability', () => {
+  const board = view(7, 1, Array(7).fill(-2), {
+    mineCount: 4, remainMines: 4, bombs: 1, canBomb: true, score: 0, oppScore: 2,
   });
-  estimated.analysis = {
-    ...estimated.analysis,
-    singlePossibleMineRegion: true,
-    bombCenters: [
-      { x: 0, y: 0, hiddenCount: 2, expectedMines: 1, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
-      { x: 1, y: 0, hiddenCount: 2, expectedMines: 1.25, estimatedHitCountProbabilities: [0, 0.75, 0.25] },
-    ],
-  };
-  assert.deepEqual(decide(estimated), { type: 'bomb', x: 0, y: 0 });
+  const maximumWinProbability = Math.max(...board.analysis.bombCenters.map(candidate =>
+    candidate.uniformHitCountProbabilities.slice(3).reduce((sum, probability) => sum + probability, 0)));
+  assert.ok(Math.abs(maximumWinProbability - 5 / 7) < 1e-12);
+  setBombThreshold(0.7);
+  try {
+    randomIndex(0);
+    assert.deepEqual(decide(board), { type: 'bomb', x: 2, y: 0 });
+    setBombThreshold(0.75);
+    assert.equal(decide(board).type, 'open');
+    setBombThreshold(0);
+    assert.equal(decide(board).type, 'open');
+  } finally {
+    setBombThreshold(null);
+  }
+});
 
-  estimated.analysis = {
-    ...estimated.analysis,
-    bombCenters: [
-      { x: 0, y: 0, hiddenCount: 2, expectedMines: 1, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
-      { x: 1, y: 0, hiddenCount: 2, expectedMines: 1.5, estimatedHitCountProbabilities: [0.5, 0, 0.5] },
-    ],
-  };
-  assert.deepEqual(decide(estimated), { type: 'bomb', x: 1, y: 0 });
+test('opening position with zero direct-win probability conserves the last bomb', () => {
+  const cells = Array(225).fill(-2);
+  cells[112] = 2;
+  cells[224] = -1;
+  const board = view(15, 15, cells, {
+    mineCount: 53, remainMines: 52, bombs: 1, canBomb: true, score: 0, oppScore: 1,
+  });
+  const neededHits = Math.floor(board.mineCount / 2) + 1 - board.score;
+  assert.equal(board.analysis.quality, 'exact');
+  assert.ok(board.analysis.bombCenters.every(candidate => candidate.hiddenCount <= 25));
+  assert.equal(Math.max(...board.analysis.bombCenters.map(candidate =>
+    candidate.uniformHitCountProbabilities.slice(neededHits).reduce((sum, probability) => sum + probability, 0))), 0);
+  assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) >= 1);
+  setBombThreshold(0.5);
+  try {
+    assert.equal(decide(board).type, 'open');
+  } finally {
+    setBombThreshold(null);
+  }
 });
 
 test('Invincible runs the bomb policy before opening an exactly certain mine', () => {
@@ -217,7 +246,6 @@ test('Invincible runs the bomb policy before opening an exactly certain mine', (
   });
   assert.equal(board.analysis.quality, 'exact');
   assert.ok(board.analysis.certainMines.length > 0);
-  assert.equal(board.analysis.singlePossibleMineRegion, false);
   assert.ok(Math.max(...board.analysis.bombCenters.map(candidate => candidate.expectedMines)) < 3);
   assert.equal(decide(board).type, 'bomb');
 });

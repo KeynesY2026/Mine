@@ -1,10 +1,10 @@
 'use strict';
 
-const { runMatch } = require('./ai-tournament-runtime');
+const { runMatch, createRuntime } = require('./ai-tournament-runtime');
 
 const UINT32_MAX = 0xffffffff;
 
-function validateTournamentOptions({ opponentId, seedStart, seedCount }) {
+function validateTournamentOptions({ opponentId, seedStart, seedCount, bombWinProbabilityThreshold }) {
   if (opponentId !== 'heuristic' && opponentId !== 'global-probability') {
     throw new Error(`Invalid opponent ID: ${opponentId}`);
   }
@@ -13,6 +13,10 @@ function validateTournamentOptions({ opponentId, seedStart, seedCount }) {
   }
   if (!Number.isInteger(seedCount) || seedCount <= 0) {
     throw new Error('seedCount must be a positive integer');
+  }
+  if (bombWinProbabilityThreshold !== undefined && bombWinProbabilityThreshold !== null
+    && (!Number.isFinite(bombWinProbabilityThreshold) || bombWinProbabilityThreshold <= 0 || bombWinProbabilityThreshold > 1)) {
+    throw new Error('bombWinProbabilityThreshold must be null or in (0, 1]');
   }
   if (seedStart + seedCount - 1 > UINT32_MAX) {
     throw new Error('Tournament seed range exceeds unsigned 32-bit integers');
@@ -27,10 +31,14 @@ function runTournament({
   height = 15,
   mineCount = 53,
   bombCount = 1,
+  bombWinProbabilityThreshold,
   includeTrace = false,
   includeHiddenMap = false,
 }) {
-  validateTournamentOptions({ opponentId, seedStart, seedCount });
+  const effectiveThreshold = bombWinProbabilityThreshold === undefined
+    ? createRuntime(seedStart).configuration.bombWinProbabilityThreshold
+    : bombWinProbabilityThreshold;
+  validateTournamentOptions({ opponentId, seedStart, seedCount, bombWinProbabilityThreshold: effectiveThreshold });
 
   const matches = [];
   const seedClusters = [];
@@ -50,6 +58,7 @@ function runTournament({
           height,
           mineCount,
           bombCount,
+          bombWinProbabilityThreshold: effectiveThreshold,
           includeTrace,
           includeHiddenMap,
         });
@@ -58,6 +67,7 @@ function runTournament({
           opponentId,
           seedStart,
           seedCount,
+          bombWinProbabilityThreshold: effectiveThreshold,
           matches,
           seedClusters,
           incomplete: {
@@ -79,6 +89,7 @@ function runTournament({
         opponentId,
         seedStart,
         seedCount,
+        bombWinProbabilityThreshold: effectiveThreshold,
         matches,
         seedClusters,
         incomplete: {
@@ -94,7 +105,7 @@ function runTournament({
     seedClusters.push({ seed, mapHash: games[0].mapHash, games });
   }
 
-  return { opponentId, seedStart, seedCount, matches, seedClusters };
+  return { opponentId, seedStart, seedCount, bombWinProbabilityThreshold: effectiveThreshold, matches, seedClusters };
 }
 
 function gameOutcome(game) {
@@ -162,6 +173,56 @@ function percentile(sortedValues, probability) {
   return sortedValues[lowerIndex] + (sortedValues[upperIndex] - sortedValues[lowerIndex]) * fraction;
 }
 
+function summarizeBombForecastCalibration(games) {
+  const boundaries = [0, 0.1, 0.5, 0.75, 0.9, 1];
+  const bins = boundaries.slice(0, -1).map((lower, index) => ({
+    lower,
+    upper: boundaries[index + 1],
+    upperInclusive: index === boundaries.length - 2,
+    count: 0,
+    predictedTotal: 0,
+    directWins: 0,
+  }));
+  let predictedTotal = 0;
+  let directWins = 0;
+  let squaredErrorTotal = 0;
+  let count = 0;
+
+  for (const game of games) for (const forecast of game.bombForecasts || []) {
+    const probability = forecast.winProbability;
+    if (!Number.isFinite(probability) || probability < 0 || probability > 1 || typeof forecast.directWin !== 'boolean') {
+      throw new Error('Invalid direct-win forecast record');
+    }
+    const observed = forecast.directWin ? 1 : 0;
+    const binIndex = bins.findIndex((bin, index) => probability >= bin.lower
+      && (probability < bin.upper || (index === bins.length - 1 && probability <= bin.upper)));
+    if (binIndex < 0) throw new Error('Forecast probability does not fit a calibration bin');
+    const bin = bins[binIndex];
+    bin.count++;
+    bin.predictedTotal += probability;
+    bin.directWins += observed;
+    predictedTotal += probability;
+    directWins += observed;
+    squaredErrorTotal += (probability - observed) ** 2;
+    count++;
+  }
+
+  return {
+    count,
+    meanPredictedWinProbability: count === 0 ? null : predictedTotal / count,
+    observedDirectWinRate: count === 0 ? null : directWins / count,
+    brierScore: count === 0 ? null : squaredErrorTotal / count,
+    bins: bins.map(bin => ({
+      lower: bin.lower,
+      upper: bin.upper,
+      upperInclusive: bin.upperInclusive,
+      count: bin.count,
+      meanPredicted: bin.count === 0 ? null : bin.predictedTotal / bin.count,
+      observedRate: bin.count === 0 ? null : bin.directWins / bin.count,
+    })),
+  };
+}
+
 function summarizeTournament(seedClusters, { bootstrapSeed, bootstrapReplicates = 10000 } = {}) {
   if (!Number.isInteger(bootstrapReplicates) || bootstrapReplicates <= 0) {
     throw new Error('bootstrapReplicates must be a positive integer');
@@ -208,8 +269,9 @@ function summarizeTournament(seedClusters, { bootstrapSeed, bootstrapReplicates 
     },
     averageScoreMargin: scoreMarginTotal / games.length,
     bombUseRate: bombUseCount / games.length,
+    forecastCalibration: summarizeBombForecastCalibration(games),
     errors: 0,
   };
 }
 
-module.exports = { runTournament, summarizeTournament };
+module.exports = { runTournament, summarizeTournament, summarizeBombForecastCalibration, seededWordGenerator };

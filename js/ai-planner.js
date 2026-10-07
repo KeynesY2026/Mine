@@ -7,6 +7,7 @@
   function analyze(view, options = {}) {
     const state = readPublicState(view);
     const maxSearchNodes = options.maxSearchNodes ?? DEFAULT_MAX_SEARCH_NODES;
+    const includeJointHitDistributions = options.includeJointHitDistributions === true;
     if (!Number.isSafeInteger(maxSearchNodes) || maxSearchNodes < 0) {
       throw new RangeError('maxSearchNodes must be a non-negative safe integer');
     }
@@ -43,7 +44,12 @@
       const probabilities = new Map(hidden.map(cell => [cell, p]));
       const certainMines = p === 1 ? hidden : [];
       const certainSafes = p === 0 ? hidden : [];
-      return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, 0);
+      let jointHitDistributions;
+      if (includeJointHitDistributions) {
+        const denominator = binomialRow(hidden.length)[remainMines];
+        jointHitDistributions = computeBombHitDistributions(state, [], free, remainMines, denominator);
+      }
+      return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, 0, jointHitDistributions);
     }
     if (maxSearchNodes === 0) return approximate(state, frontier, free, 'search limit exceeded');
 
@@ -80,7 +86,7 @@
 
     const budget = { nodes: 0, limit: maxSearchNodes, exceeded: false };
     for (const cluster of clusters) {
-      cluster.solved = enumerateCluster(cluster.cells, cluster.constraints, budget);
+      cluster.solved = enumerateCluster(cluster.cells, cluster.constraints, budget, includeJointHitDistributions);
       if (budget.exceeded) return approximate(state, frontier, free, 'search limit exceeded');
       if (cluster.solved.solutions === 0n) return approximate(state, frontier, free, 'no satisfying assignments');
     }
@@ -141,7 +147,10 @@
     }
 
     if (probabilities.size !== hidden.length) return approximate(state, frontier, free, 'incomplete probability table', minFrontierMines);
-    return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, minFrontierMines);
+    const jointHitDistributions = includeJointHitDistributions
+      ? computeBombHitDistributions(state, clusters, free, remainMines, denominator)
+      : undefined;
+    return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact', undefined, minFrontierMines, jointHitDistributions);
   }
 
   function readPublicState(view) {
@@ -179,7 +188,7 @@
     return { width, height, total, cells, hidden, mineCount, remainMines };
   }
 
-  function enumerateCluster(cells, constraints, budget) {
+  function enumerateCluster(cells, constraints, budget, includeJointHitDistributions) {
     const localIndex = new Map(cells.map((cell, index) => [cell, index]));
     const localConstraints = constraints.map(c => ({
       need: c.need,
@@ -194,8 +203,11 @@
     const assigned = localConstraints.map(() => 0);
     const mines = localConstraints.map(() => 0);
     const assignment = new Uint8Array(cells.length);
+    const bits = includeJointHitDistributions ? cells.map((_, index) => 1n << BigInt(index)) : null;
+    const assignments = includeJointHitDistributions ? [] : null;
     const hist = Array(cells.length + 1).fill(0n);
     const strata = Array.from({ length: cells.length }, () => Array(cells.length + 1).fill(0n));
+    let mineMask = includeJointHitDistributions ? 0n : null;
     let solutions = 0n;
 
     function visit(depth, mineCount) {
@@ -207,6 +219,7 @@
         }
         solutions++;
         hist[mineCount]++;
+        if (includeJointHitDistributions) assignments.push({ mineCount, mineMask });
         for (let i = 0; i < assignment.length; i++) if (assignment[i]) strata[i][mineCount]++;
         return;
       }
@@ -214,6 +227,7 @@
       const index = order[depth];
       for (let value = 0; value <= 1; value++) {
         assignment[index] = value;
+        if (value && includeJointHitDistributions) mineMask |= bits[index];
         let valid = true;
         for (const ci of membership[index]) {
           assigned[ci]++;
@@ -227,12 +241,95 @@
           assigned[ci]--;
           mines[ci] -= value;
         }
+        if (value && includeJointHitDistributions) mineMask &= ~bits[index];
         if (budget.exceeded) return;
       }
     }
 
     visit(0, 0);
-    return { solutions, hist, strata };
+    return { solutions, hist, strata, assignments, bits };
+  }
+
+  function computeBombHitDistributions(state, clusters, free, remainMines, denominator) {
+    const distributions = new Map();
+    for (const cell of state.hidden) {
+      const center = { x: cell % state.width, y: Math.floor(cell / state.width) };
+      distributions.set(cell, computeUniformHitCountProbabilities(state, center, clusters, free, remainMines, denominator));
+    }
+    return distributions;
+  }
+
+  function computeUniformHitCountProbabilities(state, center, clusters, free, remainMines, denominator) {
+    const freeSet = new Set(free);
+    let hiddenCount = 0;
+    let freeBlastCount = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const x = center.x + dx, y = center.y + dy;
+      if (x < 0 || y < 0 || x >= state.width || y >= state.height) continue;
+      const cell = y * state.width + x;
+      if (state.cells[cell] !== -2) continue;
+      hiddenCount++;
+      if (freeSet.has(cell)) freeBlastCount++;
+    }
+
+    let combined = new Map([[0, 1n]]);
+    for (const cluster of clusters) {
+      let blastMask = 0n;
+      for (let index = 0; index < cluster.cells.length; index++) {
+        const cell = cluster.cells[index];
+        const x = cell % state.width, y = Math.floor(cell / state.width);
+        if (Math.abs(x - center.x) <= 2 && Math.abs(y - center.y) <= 2) blastMask |= cluster.solved.bits[index];
+      }
+      const componentWays = new Map();
+      for (const assignment of cluster.solved.assignments) {
+        const hits = countBits(assignment.mineMask & blastMask);
+        const key = assignment.mineCount * 26 + hits;
+        componentWays.set(key, (componentWays.get(key) ?? 0n) + 1n);
+      }
+      const next = new Map();
+      for (const [combinedKey, combinedCount] of combined) {
+        const combinedMines = Math.floor(combinedKey / 26);
+        const combinedHits = combinedKey % 26;
+        for (const [componentKey, componentCount] of componentWays) {
+          const componentMines = Math.floor(componentKey / 26);
+          const componentHits = componentKey % 26;
+          const key = (combinedMines + componentMines) * 26 + combinedHits + componentHits;
+          next.set(key, (next.get(key) ?? 0n) + combinedCount * componentCount);
+        }
+      }
+      combined = next;
+    }
+
+    const blastFreeWays = binomialRow(freeBlastCount);
+    const outsideFreeWays = binomialRow(free.length - freeBlastCount);
+    const counts = Array(hiddenCount + 1).fill(0n);
+    for (const [key, componentAssignments] of combined) {
+      const frontierMines = Math.floor(key / 26);
+      const frontierHits = key % 26;
+      const freeMines = remainMines - frontierMines;
+      for (let freeHits = 0; freeHits <= freeBlastCount; freeHits++) {
+        const insideWays = blastFreeWays[freeHits];
+        const outsideWays = outsideFreeWays[freeMines - freeHits];
+        if (insideWays === undefined || outsideWays === undefined) continue;
+        counts[frontierHits + freeHits] += componentAssignments * insideWays * outsideWays;
+      }
+    }
+
+    if (counts.reduce((sum, count) => sum + count, 0n) !== denominator) return null;
+    return counts.map(count => ratio(count, denominator));
+  }
+
+  function countBits(value) {
+    let count = 0;
+    while (value) {
+      let word = Number(value & 0xffffffffn);
+      word -= (word >>> 1) & 0x55555555;
+      word = (word & 0x33333333) + ((word >>> 2) & 0x33333333);
+      word = (word + (word >>> 4)) & 0x0f0f0f0f;
+      count += (Math.imul(word, 0x01010101) >>> 24);
+      value >>= 32n;
+    }
+    return count;
   }
 
   function binomialRow(n) {
@@ -267,41 +364,12 @@
     if (numerator === denominator) return 1;
     const left = numerator.toString();
     const right = denominator.toString();
-    const leftHead = Number(left.slice(0, 16));
-    const rightHead = Number(right.slice(0, 16));
-    const exponent = left.length - right.length;
+    const leftDigits = Math.min(16, left.length);
+    const rightDigits = Math.min(16, right.length);
+    const leftHead = Number(left.slice(0, leftDigits));
+    const rightHead = Number(right.slice(0, rightDigits));
+    const exponent = (left.length - leftDigits) - (right.length - rightDigits);
     return Math.max(0, Math.min(1, (leftHead / rightHead) * (10 ** exponent)));
-  }
-
-  function hasSinglePossibleMineRegion(state, frontier, probabilities, quality) {
-    if (quality !== 'exact' || frontier.length === 0) return false;
-    const possible = new Set();
-    for (const cell of state.hidden) {
-      const probability = probabilities.get(cell);
-      if (probability > 0) possible.add(cell);
-      else if (probability !== 0) return false;
-    }
-    if (possible.size === 0) return false;
-
-    const first = possible.values().next().value;
-    const visited = new Set([first]);
-    const pending = [first];
-    for (let index = 0; index < pending.length; index++) {
-      const cell = pending[index];
-      const x = cell % state.width;
-      const y = Math.floor(cell / state.width);
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (dx === 0 && dy === 0) continue;
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
-        const neighbour = ny * state.width + nx;
-        if (possible.has(neighbour) && !visited.has(neighbour)) {
-          visited.add(neighbour);
-          pending.push(neighbour);
-        }
-      }
-    }
-    return visited.size === possible.size;
   }
 
   function approximate(state, frontier, free, error, minFrontierMines) {
@@ -314,7 +382,7 @@
     return createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, 'exact');
   }
 
-  function createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, quality, error, minFrontierMines) {
+  function createAnalysis(state, frontier, free, probabilities, certainMines, certainSafes, quality, error, minFrontierMines, jointHitDistributions) {
     const hidden = Object.freeze(state.hidden.slice());
     const frozenFrontier = Object.freeze(frontier.slice());
     const frozenFree = Object.freeze(free.slice());
@@ -328,32 +396,22 @@
     for (let y = 0; y < state.height; y++) for (let x = 0; x < state.width; x++) {
       let expectedMines = 0;
       let hiddenCount = 0;
-      let estimatedHitCountProbabilities = [1];
       for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
         const nx = x + dx, ny = y + dy;
         if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
         const cell = ny * state.width + nx;
         if (state.cells[cell] !== -2) continue;
         hiddenCount++;
-        const probability = probabilities.get(cell) ?? 0;
-        expectedMines += probability;
-        const next = new Array(estimatedHitCountProbabilities.length + 1).fill(0);
-        for (let hits = 0; hits < estimatedHitCountProbabilities.length; hits++) {
-          next[hits] += estimatedHitCountProbabilities[hits] * (1 - probability);
-          next[hits + 1] += estimatedHitCountProbabilities[hits] * probability;
-        }
-        estimatedHitCountProbabilities = next;
-      }
-      while (estimatedHitCountProbabilities.length > 1 && estimatedHitCountProbabilities[estimatedHitCountProbabilities.length - 1] === 0) {
-        estimatedHitCountProbabilities.pop();
+        expectedMines += probabilities.get(cell) ?? 0;
       }
       if (hiddenCount > 0 && state.cells[y * state.width + x] === -2) {
+        const uniformHitCountProbabilities = jointHitDistributions?.get(y * state.width + x) ?? null;
         bombCenters.push(Object.freeze({
           x,
           y,
           expectedMines,
           hiddenCount,
-          estimatedHitCountProbabilities: Object.freeze(estimatedHitCountProbabilities),
+          uniformHitCountProbabilities: uniformHitCountProbabilities === null ? null : Object.freeze(uniformHitCountProbabilities),
         }));
       }
     }
@@ -363,7 +421,6 @@
       frontierCells: frozenFrontier,
       freeCells: frozenFree,
       freeMineProbability,
-      singlePossibleMineRegion: hasSinglePossibleMineRegion(state, frozenFrontier, probabilities, quality),
       bombCenters: Object.freeze(bombCenters),
       certainMines: frozenCertainMines,
       certainSafes: frozenCertainSafes,

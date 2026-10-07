@@ -12,8 +12,8 @@ test('setup exposes bounded bomb inventory and the public-only AI bomb policy', 
   assert.match(html, /id="cfgBombs"[^>]*max="999"/);
   assert.match(html, /id="cfgDisableAiBombs"/);
   assert.doesNotMatch(html, /cfgEnhancedAI|bomb-auto|immediateWinOnly/);
-  assert.match(html, /无敌 AI 使用公开概率与公开单一区域估计选择炸弹坐标/);
-  assert.match(html, /估计不保证胜利/);
+  assert.match(html, /无敌 AI 可按公开联合命中分布评估炸弹直胜概率/);
+  assert.match(html, /估计不保证实际胜利/);
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
   assert.match(html, /id="cfgSpeed"/);
@@ -37,7 +37,7 @@ test('AI receives a frozen shared public analysis and routes coordinate bombs di
   assert.doesNotMatch(runtime, /enhancedAI|cfgEnhancedAI/);
   assert.match(ui, /cellAt:\s*shared\.snapshot\.cellAt/);
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
-  assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
+  assert.match(ui, /MineAIPlanner\.analyze\(snapshot,\s*\{\s*includeJointHitDistributions\s*\}\)/);
   assert.match(ui, /cfgDisableAiBombs/);
   assert.match(html, /仅根据公开信息选择炸弹坐标/);
   assert.match(ui, /game\.bomb\([^,]+\.x,\s*[^,]+\.y,\s*\{\s*ai:\s*true\s*\}\)/);

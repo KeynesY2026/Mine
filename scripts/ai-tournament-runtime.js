@@ -9,6 +9,7 @@ const RUNTIME_SCRIPTS = [
   'js/core.js',
   'js/ai-planner.js',
   'js/ai-decision.js',
+  'plugin/ai-config.js',
   'plugin/ai-heuristic.js',
   'plugin/ai-global-probability.js',
   'plugin/ai-constraint-probability.js',
@@ -31,7 +32,11 @@ function createSeededCrypto(seed) {
   };
 }
 
-function createRuntime(seed) {
+function createRuntime(seed, { bombWinProbabilityThreshold } = {}) {
+  if (bombWinProbabilityThreshold !== undefined && bombWinProbabilityThreshold !== null
+    && (!Number.isFinite(bombWinProbabilityThreshold) || bombWinProbabilityThreshold <= 0 || bombWinProbabilityThreshold > 1)) {
+    throw new Error('bombWinProbabilityThreshold must be undefined, null or in (0, 1]');
+  }
   const registrations = new Map();
   const context = vm.createContext({
     window: {},
@@ -49,6 +54,14 @@ function createRuntime(seed) {
     const source = fs.readFileSync(filename, 'utf8');
     vm.runInContext(source, context, { filename });
   }
+  if (bombWinProbabilityThreshold !== undefined) {
+    context.window.MineAIConfig.bombWinProbabilityThreshold = bombWinProbabilityThreshold;
+  }
+  const effectiveThreshold = context.window.MineAIConfig.bombWinProbabilityThreshold;
+  if (effectiveThreshold !== null && (!Number.isFinite(effectiveThreshold)
+    || effectiveThreshold <= 0 || effectiveThreshold > 1)) {
+    throw new Error('Configured bombWinProbabilityThreshold must be null or in (0, 1]');
+  }
 
   const core = { MineCore: context.window.MineCore };
   const planner = { MineAIPlanner: context.window.MineAIPlanner };
@@ -64,7 +77,23 @@ function createRuntime(seed) {
   }
   if (!planner || !decisionGuard) throw new Error('Runtime did not load the AI planner and decision guard');
 
-  return { core, planner, decisionGuard, decisions };
+  return { core, planner, decisionGuard, decisions, configuration: context.window.MineAIConfig };
+}
+
+function publicBombWinForecast(view, x, y, threshold) {
+  if (view.analysis.quality !== 'exact') return null;
+  const candidate = view.analysis.bombCenters.find(center => center.x === x && center.y === y);
+  if (!candidate || !Array.isArray(candidate.uniformHitCountProbabilities)) return null;
+  const neededHits = Math.floor(view.mineCount / 2) + 1 - view.score;
+  const winProbability = candidate.uniformHitCountProbabilities
+    .slice(Math.max(0, neededHits))
+    .reduce((sum, probability) => sum + probability, 0);
+  return {
+    model: 'uniform-valid-layouts',
+    neededHits,
+    winProbability,
+    threshold,
+  };
 }
 
 function runMatch({
@@ -75,6 +104,7 @@ function runMatch({
   height = 15,
   mineCount = 53,
   bombCount = 1,
+  bombWinProbabilityThreshold,
   includeTrace = false,
   includeHiddenMap = false,
 }, runtimeOverride) {
@@ -85,13 +115,19 @@ function runMatch({
     throw new Error(`Invalid opponent ID: ${opponentId}`);
   }
 
-  const runtime = runtimeOverride || createRuntime(seed);
+  const runtime = runtimeOverride || createRuntime(seed, { bombWinProbabilityThreshold });
   const { MineCore } = runtime.core;
   const game = new MineCore.Game({ width, height, mineCount, bombCount });
   const opponentSide = invincibleSide === 'blue' ? 'red' : 'blue';
   const mapHash = createHash('sha256').update(Buffer.from(game.mines)).digest('hex');
   const trace = [];
   const moveLimit = width * height + 1;
+  let invincibleBombs = 0;
+  let directBombs = 0;
+  let directBombWins = 0;
+  let predictedBombCount = 0;
+  let predictedWinProbabilityTotal = 0;
+  const bombForecasts = [];
 
   function makeView(player) {
     const source = game.view(player, { ai: true });
@@ -108,7 +144,9 @@ function runMatch({
         return values[y * width + x];
       },
     });
-    const analysis = runtime.planner.MineAIPlanner.analyze(snapshot);
+    const includeJointHitDistributions = player === invincibleSide && source.canBomb && source.bombs > 0
+      && runtime.configuration.bombWinProbabilityThreshold !== null;
+    const analysis = runtime.planner.MineAIPlanner.analyze(snapshot, { includeJointHitDistributions });
     const view = Object.freeze({
       width: source.width,
       height: source.height,
@@ -176,6 +214,12 @@ function runMatch({
     }
 
     const executedAction = resolved.action;
+    const isInvincibleBomb = actor === invincibleSide && executedAction.type === 'bomb';
+    const bombForecast = isInvincibleBomb
+      ? publicBombWinForecast(view, executedAction.x, executedAction.y, runtime.configuration.bombWinProbabilityThreshold)
+      : null;
+    const directBombOverride = bombForecast !== null && bombForecast.threshold !== null
+      && bombForecast.threshold > 0 && bombForecast.winProbability >= bombForecast.threshold;
     let result;
     if (executedAction.type === 'open') result = game.open(executedAction.x, executedAction.y);
     else if (executedAction.type === 'bomb') result = game.bomb(executedAction.x, executedAction.y, { ai: true });
@@ -185,6 +229,26 @@ function runMatch({
     }
 
     moveCount++;
+    const invincibleDirectWin = isInvincibleBomb
+      && game.scores[invincibleSide] >= Math.floor(mineCount / 2) + 1;
+    if (isInvincibleBomb) {
+      invincibleBombs++;
+      if (bombForecast !== null) {
+        predictedBombCount++;
+        predictedWinProbabilityTotal += bombForecast.winProbability;
+        bombForecasts.push({
+          x: executedAction.x,
+          y: executedAction.y,
+          ...bombForecast,
+          overrideApplied: directBombOverride,
+          directWin: invincibleDirectWin,
+        });
+      }
+      if (directBombOverride) {
+        directBombs++;
+        if (invincibleDirectWin) directBombWins++;
+      }
+    }
     if (includeTrace) {
       const publicAfter = game.view(actor, { ai: true });
       trace.push({
@@ -201,6 +265,10 @@ function runMatch({
         })),
         scoresAfter: { blue: game.scores.blue, red: game.scores.red },
         bombsAfter: { blue: game.bombs.blue, red: game.bombs.red },
+        ...(isInvincibleBomb ? {
+          ...(bombForecast === null ? {} : { directWinForecast: bombForecast }),
+          directWin: invincibleDirectWin,
+        } : {}),
       });
     }
   }
@@ -217,6 +285,12 @@ function runMatch({
     scores: { blue: game.scores.blue, red: game.scores.red },
     scoreMargin: invincibleScore - opponentScore,
     bombsUsed: game.bombMax - game.bombs[invincibleSide],
+    invincibleBombs,
+    directBombs,
+    directBombWins,
+    predictedBombCount,
+    meanPredictedWinProbability: predictedBombCount === 0 ? null : predictedWinProbabilityTotal / predictedBombCount,
+    bombForecasts,
     moveCount,
     mapHash,
   };

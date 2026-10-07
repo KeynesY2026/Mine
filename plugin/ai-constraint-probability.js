@@ -60,21 +60,24 @@ function selectByExpectedMines(candidates) {
   return tied.length ? tied[randInt(tied.length)] : null;
 }
 
-function selectByEstimatedWinProbability(candidates, needed) {
-  let maximum = -Infinity;
+function selectByWinProbability(candidates, needed, threshold) {
+  if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1) return null;
+  let maximum = 0;
   let tied = [];
   for (const candidate of candidates) {
-    const probabilities = candidate.estimatedHitCountProbabilities || [];
+    const probabilities = candidate.uniformHitCountProbabilities;
+    if (!Array.isArray(probabilities)) continue;
     let winProbability = 0;
     for (let hits = Math.max(0, needed); hits < probabilities.length; hits++) {
       winProbability += probabilities[hits];
     }
+    if (!Number.isFinite(winProbability) || winProbability <= 0) continue;
     if (winProbability > maximum) {
       maximum = winProbability;
       tied = [candidate];
     } else if (winProbability === maximum) tied.push(candidate);
   }
-  return selectByExpectedMines(tied);
+  return maximum >= threshold ? selectByExpectedMines(tied) : null;
 }
 
 function chooseBomb(view) {
@@ -82,15 +85,17 @@ function chooseBomb(view) {
   const candidates = (view.analysis.bombCenters || []).filter(candidate => candidate.hiddenCount > 0);
   if (!candidates.length) return null;
 
-  let best;
-  if (view.analysis.singlePossibleMineRegion) {
+  let best = null;
+  if (view.analysis.quality === 'exact') {
     const needed = Math.floor(view.mineCount / 2) + 1 - view.score;
-    best = selectByEstimatedWinProbability(candidates, needed);
-  } else {
+    const threshold = window.MineAIConfig?.bombWinProbabilityThreshold;
+    best = selectByWinProbability(candidates, needed, threshold);
+  }
+  if (!best) {
     best = selectByExpectedMines(candidates);
     if (!best || best.expectedMines >= view.oppScore - view.score) return null;
   }
-  return best ? { type: 'bomb', x: best.x, y: best.y } : null;
+  return { type: 'bomb', x: best.x, y: best.y };
 }
 
 function makeDecision(view) {

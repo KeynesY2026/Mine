@@ -21,11 +21,14 @@ test('parseArgs normalizes tournament options and uses disjoint split defaults',
     traceDir: null,
     includeHiddenMap: false,
     output: null,
+    bombWinProbabilityThreshold: undefined,
     help: false,
   });
   assert.equal(parseArgs([]).seedStart, 100000);
   assert.equal(parseArgs(['--split', 'validation']).seedStart, 1000000000);
   assert.equal(parseArgs(['--seed-start', '7', '--split', 'validation']).seedStart, 7);
+  assert.equal(parseArgs(['--bomb-win-probability-threshold', '0.75']).bombWinProbabilityThreshold, 0.75);
+  assert.equal(parseArgs(['--bomb-win-probability-threshold', 'off']).bombWinProbabilityThreshold, null);
 });
 
 test('parseArgs rejects invalid or incomplete options with readable errors', () => {
@@ -37,6 +40,9 @@ test('parseArgs rejects invalid or incomplete options with readable errors', () 
     ['--unknown'],
     ['--include-hidden-map'],
     ['--seed-start', '4294967295', '--seed-count', '2'],
+    ['--bomb-win-probability-threshold', '0'],
+    ['--bomb-win-probability-threshold', '1.01'],
+    ['--bomb-win-probability-threshold', 'not-a-number'],
   ];
   for (const args of invalidArguments) {
     assert.throws(() => parseArgs(args), Error, `arguments should be rejected: ${args.join(' ')}`);
@@ -48,6 +54,7 @@ test('--help returns usage without launching a tournament', () => {
   assert.equal(options.help, true);
   const result = runCli(options);
   assert.ok(result.help.includes('Usage: node scripts/ai-tournament.js'));
+  assert.match(result.help, /default: production config/);
 });
 
 test('runCli writes aggregate JSON, public traces, and separate post-game hidden maps', () => {
@@ -59,12 +66,14 @@ test('runCli writes aggregate JSON, public traces, and separate post-game hidden
       '--opponent', 'heuristic',
       '--seed-start', '42',
       '--seed-count', '1',
+      '--bomb-win-probability-threshold', '0.75',
       '--trace-dir', traceDir,
       '--include-hidden-map',
       '--output', output,
     ]));
     assert.equal(report.seedStart, 42);
     assert.equal(report.seedCount, 1);
+    assert.equal(report.bombWinProbabilityThreshold, 0.75);
     assert.deepEqual(report.config, { width: 15, height: 15, mineCount: 53, bombCount: 1 });
     assert.equal(report.opponents.heuristic.summary.games, 2);
     assert.equal(report.opponents.heuristic.seedClusters.length, 1);
@@ -91,6 +100,15 @@ test('runCli writes aggregate JSON, public traces, and separate post-game hidden
   }
 });
 
+test('runCli reports the effective production cutoff when the flag is omitted', () => {
+  const report = runCli(parseArgs([
+    '--opponent', 'heuristic', '--seed-start', '56', '--seed-count', '1',
+  ]));
+
+  assert.equal(parseArgs([]).bombWinProbabilityThreshold, undefined);
+  assert.equal(report.bombWinProbabilityThreshold, 0.5);
+});
+
 test('seeded crypto fills deterministic words and continues its sequence', () => {
   const first = createSeededCrypto(12345);
   const second = createSeededCrypto(12345);
@@ -113,17 +131,31 @@ test('seeded crypto fills deterministic words and continues its sequence', () =>
 });
 
 test('runtime map generation and decision functions are deterministic and available', () => {
-  const first = createRuntime(12345);
+  const first = createRuntime(12345, { bombWinProbabilityThreshold: 0.75 });
   const second = createRuntime(12345);
   const config = { width: 7, height: 7, mineCount: 9, bombCount: 1 };
   const firstGame = new first.core.MineCore.Game(config);
   const secondGame = new second.core.MineCore.Game(config);
 
   assert.deepEqual(Array.from(firstGame.mines), Array.from(secondGame.mines));
+  assert.equal(first.configuration.bombWinProbabilityThreshold, 0.75);
+  assert.equal(second.configuration.bombWinProbabilityThreshold, 0.5);
   for (const id of ['heuristic', 'global-probability', 'constraint-probability']) {
     assert.equal(typeof first.decisions[id], 'function', `${id} decision is callable`);
     assert.equal(typeof second.decisions[id], 'function', `${id} decision is callable`);
   }
+});
+
+test('omitted tournament cutoff uses production config while explicit null disables it', () => {
+  const options = {
+    opponentId: 'heuristic', seedStart: 12345, seedCount: 1,
+    width: 7, height: 7, mineCount: 9, bombCount: 1,
+  };
+  const production = runTournament(options);
+  const disabled = runTournament({ ...options, bombWinProbabilityThreshold: null });
+
+  assert.equal(production.bombWinProbabilityThreshold, 0.5);
+  assert.equal(disabled.bombWinProbabilityThreshold, null);
 });
 
 test('different seeds produce different deterministic random sequences', () => {
@@ -163,7 +195,7 @@ test('runMatch completes a deterministic official-rule match', () => {
 
 test('runMatch executes and traces the exact coordinate requested by Invincible', () => {
   const { createRuntime, runMatch } = require('../scripts/ai-tournament-runtime');
-  const runtime = createRuntime(6);
+  const runtime = createRuntime(6, { bombWinProbabilityThreshold: 0.5 });
   const NativeGame = runtime.core.MineCore.Game;
   const calls = [];
   runtime.core.MineCore.Game = class extends NativeGame {
@@ -198,6 +230,22 @@ test('runMatch executes and traces the exact coordinate requested by Invincible'
   assert.equal(Object.hasOwn(bombTrace.view, 'enhancedAI'), false);
   assert.deepEqual(calls[0], { x: traced.x, y: traced.y, ai: true });
   assert.equal(Object.hasOwn(traced, 'immediateWinOnly'), false);
+  assert.equal(bombTrace.directWinForecast.model, 'uniform-valid-layouts');
+  assert.equal(typeof bombTrace.directWinForecast.neededHits, 'number');
+  assert.equal(bombTrace.directWinForecast.threshold, 0.5);
+  assert.equal(typeof bombTrace.directWinForecast.winProbability, 'number');
+  assert.equal(typeof bombTrace.directWin, 'boolean');
+  assert.equal(result.bombForecasts.length, 1);
+  assert.equal(result.bombForecasts[0].model, 'uniform-valid-layouts');
+  assert.equal(result.bombForecasts[0].winProbability, bombTrace.directWinForecast.winProbability);
+  assert.equal(result.bombForecasts[0].directWin, bombTrace.directWin);
+  assert.equal(result.bombForecasts[0].overrideApplied, bombTrace.directWinForecast.winProbability >= 0.5);
+  assert.equal(result.invincibleBombs, 1);
+  assert.equal(result.predictedBombCount, 1);
+  const metCutoff = bombTrace.directWinForecast.winProbability >= 0.5;
+  assert.equal(result.directBombs, metCutoff ? 1 : 0);
+  assert.equal(result.directBombWins, metCutoff && bombTrace.directWin ? 1 : 0);
+  assert.equal(result.meanPredictedWinProbability, bombTrace.directWinForecast.winProbability);
 });
 
 test('runMatch rejects an invalid AI decision instead of executing its legal fallback', () => {
@@ -216,6 +264,17 @@ test('runMatch rejects an invalid AI decision instead of executing its legal fal
   }, runtime), /Invalid AI decision/);
 });
 
+test('changing the bomb threshold does not change the seeded map', () => {
+  const { runMatch } = require('../scripts/ai-tournament-runtime');
+  const options = {
+    seed: 54321, invincibleSide: 'blue', opponentId: 'heuristic',
+    width: 7, height: 7, mineCount: 9, bombCount: 1,
+  };
+  const baseline = runMatch(options);
+  const treatment = runMatch({ ...options, bombWinProbabilityThreshold: 0.75 });
+  assert.equal(treatment.mapHash, baseline.mapHash);
+});
+
 test('runTournament pairs both Invincible seats on the same seeded map', () => {
   const tournament = runTournament({
     opponentId: 'heuristic',
@@ -225,8 +284,10 @@ test('runTournament pairs both Invincible seats on the same seeded map', () => {
     height: 7,
     mineCount: 9,
     bombCount: 1,
+    bombWinProbabilityThreshold: 0.75,
   });
 
+  assert.equal(tournament.bombWinProbabilityThreshold, 0.75);
   assert.equal(tournament.opponentId, 'heuristic');
   assert.equal(tournament.seedStart, 12345);
   assert.equal(tournament.seedCount, 1);
@@ -294,6 +355,72 @@ test('summarizeTournament reports paired outcomes and reproducible cluster boots
   assert.ok(first.confidence95.lower >= 0 && first.confidence95.lower <= 1);
   assert.ok(first.confidence95.upper >= 0 && first.confidence95.upper <= 1);
   assert.ok(first.confidence95.lower <= first.confidence95.upper);
+});
+
+test('summarizeTournament reports forecast calibration against realized direct wins', () => {
+  const summary = summarizeTournament([{
+    seed: 1,
+    mapHash: 'map-1',
+    games: [
+      {
+        invincibleSide: 'blue', winner: 'blue', scoreMargin: 2, bombsUsed: 1,
+        bombForecasts: [{ model: 'uniform-valid-layouts', winProbability: 0.9, directWin: true }],
+      },
+      {
+        invincibleSide: 'red', winner: 'blue', scoreMargin: -2, bombsUsed: 1,
+        bombForecasts: [{ model: 'uniform-valid-layouts', winProbability: 0.25, directWin: false }],
+      },
+    ],
+  }], { bootstrapSeed: 99, bootstrapReplicates: 20 });
+
+  assert.deepEqual(summary.forecastCalibration, {
+    count: 2,
+    meanPredictedWinProbability: 0.575,
+    observedDirectWinRate: 0.5,
+    brierScore: 0.03625,
+    bins: [
+      { lower: 0, upper: 0.1, upperInclusive: false, count: 0, meanPredicted: null, observedRate: null },
+      { lower: 0.1, upper: 0.5, upperInclusive: false, count: 1, meanPredicted: 0.25, observedRate: 0 },
+      { lower: 0.5, upper: 0.75, upperInclusive: false, count: 0, meanPredicted: null, observedRate: null },
+      { lower: 0.75, upper: 0.9, upperInclusive: false, count: 0, meanPredicted: null, observedRate: null },
+      { lower: 0.9, upper: 1, upperInclusive: true, count: 1, meanPredicted: 0.9, observedRate: 1 },
+    ],
+  });
+});
+
+test('treatment comparison requires matching seed clusters and reports paired deltas', () => {
+  const { compareTournamentTreatments } = require('../scripts/compare-ai-tournament-treatments');
+  const game = (side, result, scoreMargin) => ({
+    invincibleSide: side,
+    winner: result === 'draw' ? 'draw' : result === 'win' ? side : side === 'blue' ? 'red' : 'blue',
+    scoreMargin,
+    bombsUsed: 0,
+  });
+  const report = (clusters, threshold) => ({
+    bombWinProbabilityThreshold: threshold,
+    opponents: { heuristic: { seedClusters: clusters } },
+  });
+  const baseline = report([
+    { seed: 1, mapHash: 'map-1', games: [game('blue', 'win', 1), game('red', 'loss', -1)] },
+    { seed: 2, mapHash: 'map-2', games: [game('blue', 'loss', -2), game('red', 'win', 2)] },
+  ], null);
+  const treatment = report([
+    { seed: 1, mapHash: 'map-1', games: [game('blue', 'win', 3), game('red', 'win', 1)] },
+    { seed: 2, mapHash: 'map-2', games: [game('blue', 'draw', 0), game('red', 'win', 4)] },
+  ], 0.75);
+  const result = compareTournamentTreatments(baseline, treatment, { bootstrapSeed: 55, bootstrapReplicates: 500 });
+  const comparison = result.opponents.heuristic;
+  assert.equal(comparison.seedClusters, 2);
+  assert.equal(comparison.baseline.bombsUsed, 0);
+  assert.equal(comparison.baseline.bombUseRate, 0);
+  assert.equal(comparison.winPointDelta, 0.375);
+  assert.equal(comparison.scoreMarginDelta, 2);
+  assert.ok(comparison.winPointDeltaCI95.lower <= comparison.winPointDelta);
+  assert.ok(comparison.winPointDeltaCI95.upper >= comparison.winPointDelta);
+  assert.throws(() => compareTournamentTreatments(baseline, report([
+    { ...treatment.opponents.heuristic.seedClusters[0], mapHash: 'different-map' },
+    treatment.opponents.heuristic.seedClusters[1],
+  ], 0.75)), /map hash mismatch/);
 });
 
 test('runMatch traces public inputs and only attaches hidden map after completion', () => {
