@@ -135,6 +135,7 @@ class Game {
 
   get scoreTotal() { return this.scores.blue + this.scores.red; }
   get remainMines() { return this.mineCount - this.scoreTotal; }
+  get winNeed() { return Math.floor(this.mineCount / 2) + 1; }
   isPlayerTurn(p) { return this.turn === p && !this.over; }
   canBomb(p, { ai = false } = {}) {
     if (this.over || (ai && this.disableAiBombs)) return false;

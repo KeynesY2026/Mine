@@ -17,10 +17,32 @@ for (const path of [
   'plugin/ai-constraint-probability.js',
 ]) vm.runInContext(fs.readFileSync(path, 'utf8'), sandbox);
 
-function boardWithMines(indices) {
-  const board = new sandbox.window.MineCore.Game({ width: 7, height: 7, mineCount: 6, bombCount: 1 });
+const Game = sandbox.window.MineCore.Game;
+const CAPTURED_MINES = Array.from({ length: 25 }, (_, index) => index);
+
+function capturedMineState(remainingMineIndices) {
+  const board = new Game({ width: 15, height: 15, mineCount: 53, bombCount: 1 });
   board.mines.fill(0);
-  for (const index of indices) board.mines[index] = 1;
+  for (const index of [...CAPTURED_MINES, ...remainingMineIndices]) board.mines[index] = 1;
+  for (let index = 0; index < board.total; index++) {
+    let adjacentMines = 0;
+    sandbox.window.MineCore.eachNei(board.nb, index, neighbor => {
+      if (board.mines[neighbor]) adjacentMines++;
+    });
+    board.numbers[index] = adjacentMines;
+  }
+
+  board.revealed.fill(0);
+  board.owner.fill(0);
+  for (const index of CAPTURED_MINES) {
+    board.revealed[index] = 1;
+    board.owner[index] = 2;
+  }
+  board.scores.blue = 0;
+  board.scores.red = 25;
+  board.bombs.blue = 1;
+  board.turn = 'blue';
+  board.hiddenCount = board.total - CAPTURED_MINES.length;
   return board;
 }
 
@@ -56,31 +78,64 @@ function publicDecisionView(board) {
   });
 }
 
-test('different hidden layouts with identical public views yield identical analyses and AI choices', () => {
-  const left = boardWithMines([0, 2, 4, 6, 8, 10]);
-  const right = boardWithMines([36, 38, 40, 42, 44, 46]);
+function publicProbabilityDistribution(view) {
+  return Array.from({ length: view.width * view.height }, (_, index) => {
+    const x = index % view.width, y = Math.floor(index / view.width);
+    return view.cellAt(x, y) === -2 ? view.analysis.mineProbabilityAt(x, y) : null;
+  });
+}
+
+test('public-only Invincible bombs use identical coordinates, not hidden auto-selection', () => {
+  const left = capturedMineState(Array.from({ length: 28 }, (_, index) => index + 25));
+  const right = capturedMineState(Array.from({ length: 28 }, (_, index) => index + 100));
   const leftView = publicDecisionView(left);
   const rightView = publicDecisionView(right);
 
+  assert.equal(left.canBomb('blue', { ai: true }), true);
+  assert.equal(right.canBomb('blue', { ai: true }), true);
+  assert.equal(left.scores.blue, 0);
+  assert.equal(left.scores.red, 25);
+  assert.equal(left.bombs.blue, 1);
+  assert.equal(left.mineCount, 53);
+  assert.equal(left.hiddenCount, 200);
+  assert.equal(left.revealed.reduce((sum, value) => sum + value, 0), 25);
+  assert.equal(left.mines.reduce((sum, value) => sum + value, 0), 53);
+  assert.equal(leftView.canBomb, true);
+  assert.equal(rightView.canBomb, true);
+  assert.equal(leftView.score, 0);
+  assert.equal(leftView.oppScore, 25);
+  assert.equal(leftView.oppScore - leftView.score, 25);
+  assert.equal(leftView.remainMines, 28);
+  assert.equal(leftView.bombs, 1);
+  assert.equal(leftView.analysis.hiddenCells.length, 200);
   assert.notDeepEqual(Array.from(left.mines), Array.from(right.mines));
-  assert.deepEqual(
-    Array.from({ length: 49 }, (_, i) => leftView.cellAt(i % 7, Math.floor(i / 7))),
-    Array.from({ length: 49 }, (_, i) => rightView.cellAt(i % 7, Math.floor(i / 7))),
-  );
-  assert.equal(leftView.analysis.quality, rightView.analysis.quality);
-  assert.deepEqual(Array.from(leftView.analysis.hiddenCells), Array.from(rightView.analysis.hiddenCells));
-  assert.deepEqual(Array.from(leftView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines]),
-    Array.from(rightView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines]));
 
-  const leftActions = [
-    sandbox.window.MineCore.weakDecide(leftView),
-    sandbox.window.MineCore.strongDecide(leftView),
-    plugins['constraint-probability'](leftView),
-  ];
-  const rightActions = [
-    sandbox.window.MineCore.weakDecide(rightView),
-    sandbox.window.MineCore.strongDecide(rightView),
-    plugins['constraint-probability'](rightView),
-  ];
-  assert.deepEqual(JSON.parse(JSON.stringify(leftActions)), JSON.parse(JSON.stringify(rightActions)));
+  const leftPublicCells = Array.from({ length: 225 }, (_, index) => leftView.cellAt(index % 15, Math.floor(index / 15)));
+  const rightPublicCells = Array.from({ length: 225 }, (_, index) => rightView.cellAt(index % 15, Math.floor(index / 15)));
+  assert.deepEqual(leftPublicCells, rightPublicCells);
+  assert.deepEqual(publicProbabilityDistribution(leftView), publicProbabilityDistribution(rightView));
+  assert.equal(leftView.analysis.quality, 'exact');
+  assert.equal(rightView.analysis.quality, 'exact');
+  assert.deepEqual(
+    Array.from(leftView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines, item.hiddenCount,
+      Array.from(item.estimatedHitCountProbabilities)]),
+    Array.from(rightView.analysis.bombCenters, item => [item.x, item.y, item.expectedMines, item.hiddenCount,
+      Array.from(item.estimatedHitCountProbabilities)]),
+  );
+
+  const maximumExpectedYield = Math.max(...leftView.analysis.bombCenters.map(center => center.expectedMines));
+  assert.ok(Math.abs(maximumExpectedYield - 3.5) < 1e-12);
+  assert.ok(maximumExpectedYield < leftView.oppScore - leftView.score);
+
+  const leftAction = plugins['constraint-probability'](leftView);
+  const rightAction = plugins['constraint-probability'](rightView);
+  assert.equal(leftAction.type, 'bomb');
+  assert.deepEqual(JSON.parse(JSON.stringify(leftAction)), JSON.parse(JSON.stringify(rightAction)));
+  assert.deepEqual(Object.keys(leftAction).sort(), ['type', 'x', 'y']);
+  assert.ok(Number.isInteger(leftAction.x) && Number.isInteger(leftAction.y));
+  assert.equal(leftView.cellAt(leftAction.x, leftAction.y), -2);
+
+  // A stale caller's old enhanced-auto hint must not restore hidden-map selection.
+  const legacyOptInAction = plugins['constraint-probability']({ ...leftView, enhancedAI: true });
+  assert.deepEqual(JSON.parse(JSON.stringify(legacyOptInAction)), JSON.parse(JSON.stringify(leftAction)));
 });

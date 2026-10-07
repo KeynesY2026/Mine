@@ -1,6 +1,36 @@
 # MineStorm AI development baseline
 
-**Status:** The strict baseline and corrected paired final-bomb direct-win experiment are complete. The first treatment missed an exact-analysis early-return path and is superseded by the corrected rerun. The corrected tournament had no invalid decisions or incomplete matches; independent reviewers found no code issues. The broader policy of spending a last bomb when it is unlikely to recover the deficit remains untested.
+**Status:** The strict baseline and corrected paired final-bomb direct-win experiment below are historical. The unified public-only coordinate-bomb treatment is documented first. All new treatment matches passed strict decision validation, pairing checks, and the bounded replay audit. Public hit-count and win estimates are approximate, not win guarantees.
+
+## Unified public-only coordinate-bomb policy (paired follow-up)
+
+The engine-side hidden selector and `bomb-auto` route have been removed. Invincible now commits to a concrete hidden-cell coordinate selected only from the shared public analysis and public score state. When the exact analysis identifies a single possible mine region, it ranks candidate blasts by the public marginal estimate of reaching the win line. Otherwise it chooses the highest public expected-yield blast only when that expected yield is below the current score gap, and conserves the bomb when the expected yield could meet or exceed that gap. `cfgDisableAiBombs`, engine legality, and ordinary `Game.bomb(x, y)` resolution remain in force. Probability-derived hit-count and win estimates are approximate and are not actual-win guarantees; actual hits are resolved only after the coordinate is chosen.
+
+### Method and pairing
+
+- Runtime: Node.js `v24.14.0`; configuration `15×15`, `53` mines, `1` bomb per player; both seats and both opponents (`heuristic`, `global-probability`); seeds `100000–100999` inclusive (`1000` paired map clusters per opponent, `2000` games per opponent).
+- The pre-treatment comparator is the corrected direct-win artifact `C:\Users\keyn1\AppData\Local\Temp\minestorm-ai-baseline-Kk2vfn\direct-win-1000-post-certain-fix.json`. The range/configuration and map hashes were verified against it, including blue-then-red seat order: `1000/1000` matching hashes and seats for each opponent.
+- To avoid the timeout of one monolithic run, the treatment was run in distinct bounded seed chunks (first 25 seeds; then nine 100-seed chunks; then 75 seeds). All `1000` clusters were aggregated only after every chunk completed. Chunk wall times totalled `646.971 s` (`10m46.971s`); there were no incomplete tournaments, invalid decisions, or errors.
+- Treatment outputs and the separate chunk JSON/stdout files are under `C:\Users\keyn1\AppData\Local\Temp\public-only-bomb-policy\`. Aggregated results are `public-only-1000.json` and `public-only-1000.stdout.json`; pairing and bootstrap calculations are in `paired-analysis.json`. The analysis script is `aggregate-public-only.js`.
+
+### Results
+
+The ordinary tournament intervals below are game-level normal 95% intervals computed separately for each tournament while treating its `2000` games as independent. They describe each tournament and are not used as treatment-effect intervals. Paired deltas instead use `20,000` deterministic bootstrap replicates resampling the `1000` matched seed clusters, retaining both seat-swapped games together. Paired bootstrap seeds are recorded with the results.
+
+| Opponent | Direct-win comparator wins / rate; independent 95% CI | Public-only wins / rate; independent 95% CI | Paired win-rate delta; 95% paired-cluster CI | Mean margin comparator → treatment; paired delta 95% CI | Invincible bomb use | Errors |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Simple (`heuristic`) | 1226/2000 (61.30%; 59.16–63.44%) | 1248/2000 (62.40%; 60.28–64.52%) | +1.10 pp (−1.90 to +4.10 pp); seed `20261012` | +2.159 → +2.739; +0.580 (95% CI +0.168 to +0.982); seed `20261014` | 1892/2000 games (94.60%) | 0 |
+| Medium (`global-probability`) | 1458/2000 (72.90%; 70.95–74.85%) | 1526/2000 (76.30%; 74.44–78.16%) | +3.40 pp (95% CI +0.90 to +5.90 pp); seed `20261013` | +4.905 → +6.3255; +1.4205 (95% CI +1.066 to +1.779); seed `20261015` | 1423/2000 games (71.15%) | 0 |
+
+Win-rate cluster outcomes improved/tied/worsened were `313/395/292` (Simple) and `262/529/209` (Medium). Score-margin clusters improved/tied/worsened were `528/24/448` (Simple) and `534/126/340` (Medium). The Simple paired win-rate CI includes zero; the Medium paired win-rate and both paired score-margin intervals are above zero. The independent tournament intervals must not be mistaken for paired CIs on those deltas.
+
+### Bomb replay and trace audit
+
+Ten bomb-using clusters per opponent were replayed (seeds `100000–100009` for each; both seats, `20` games per opponent). Public action traces and post-game hidden maps are stored separately under `C:\Users\keyn1\AppData\Local\Temp\public-only-bomb-policy\replays\`; the audit is `replay-audit.json`, and `audit-replays.js` reproduces the checks. Across the selected replays there were `39` bomb actions total for Simple (19 by Invincible, 20 by the opponent) and `15` for Medium (15 by Invincible, none by the opponent). The audit checked `1786` (Simple) and `2018` (Medium) public trace entries. Every bomb was a legal concrete coordinate matching the recorded decision and executed action; the recorded map hash matched the separately stored 225-cell/53-mine hidden map, and recomputed blast hit counts matched the score change. No trace exposed the hidden map.
+
+### Limitations
+
+These paired results evaluate this seed range and the specified opponent/runtime configuration only; they do not establish general strategy optimality. The single-region win estimates derive from public marginal hit-count probabilities and remain approximate. Independent game-level intervals assume independent games despite seat-swapped shared maps; treatment deltas should be interpreted using the paired seed-cluster intervals instead. Previous baseline and direct-win-only results and conclusions below remain historical, not results for this unified policy.
 
 ## Run identity and protocol
 

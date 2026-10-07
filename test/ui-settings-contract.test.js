@@ -4,13 +4,16 @@ const fs = require('node:fs');
 
 const html = fs.readFileSync('index.html', 'utf8');
 const ui = fs.readFileSync('js/ui.js', 'utf8');
+const runtime = fs.readFileSync('scripts/ai-tournament-runtime.js', 'utf8');
 const core = fs.readFileSync('js/core.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 
-test('setup exposes bounded bomb inventory and default-on enhanced AI option', () => {
+test('setup exposes bounded bomb inventory and the public-only AI bomb policy', () => {
   assert.match(html, /id="cfgBombs"[^>]*max="999"/);
   assert.match(html, /id="cfgDisableAiBombs"/);
-  assert.match(html, /<input type="checkbox" id="cfgEnhancedAI" checked>/);
+  assert.doesNotMatch(html, /cfgEnhancedAI|bomb-auto|immediateWinOnly/);
+  assert.match(html, /无敌 AI 使用公开概率与公开单一区域估计选择炸弹坐标/);
+  assert.match(html, /估计不保证胜利/);
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
   assert.match(html, /id="cfgSpeed"/);
@@ -30,12 +33,13 @@ test('hint and cheat controls stay hidden until the secret sequence unlocks them
 
 test('AI receives a frozen shared public analysis and routes coordinate bombs directly', () => {
   assert.match(ui, /analysis:\s*shared\.analysis/);
-  assert.match(ui, /enhancedAI:\s*\$\('cfgEnhancedAI'\)\.checked/);
+  assert.doesNotMatch(ui, /enhancedAI|cfgEnhancedAI/);
+  assert.doesNotMatch(runtime, /enhancedAI|cfgEnhancedAI/);
   assert.match(ui, /cellAt:\s*shared\.snapshot\.cellAt/);
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
   assert.match(ui, /MineAIPlanner\.analyze\(snapshot\)/);
-  assert.match(ui, /cfgEnhancedAI/);
   assert.match(ui, /cfgDisableAiBombs/);
+  assert.match(html, /仅根据公开信息选择炸弹坐标/);
   assert.match(ui, /game\.bomb\([^,]+\.x,\s*[^,]+\.y,\s*\{\s*ai:\s*true\s*\}\)/);
   assert.doesNotMatch(ui, /bombBest|bomb-auto|immediateWinOnly/);
   assert.doesNotMatch(core, /bombBest\s*\(/);

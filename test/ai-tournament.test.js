@@ -181,6 +181,7 @@ test('runMatch executes and traces the exact coordinate requested by Invincible'
     }
   };
   runtime.decisions['constraint-probability'] = view => {
+    assert.equal(Object.hasOwn(view, 'enhancedAI'), false);
     const cell = view.analysis.hiddenCells[0];
     if (view.canBomb && view.bombs > 0) {
       const center = view.analysis.bombCenters[0];
@@ -192,7 +193,9 @@ test('runMatch executes and traces the exact coordinate requested by Invincible'
     seed: 6, invincibleSide: 'blue', opponentId: 'heuristic',
     width: 7, height: 7, mineCount: 9, bombCount: 1, includeTrace: true,
   }, runtime);
-  const traced = result.trace.find(step => step.resolvedAction.type === 'bomb').resolvedAction;
+  const bombTrace = result.trace.find(step => step.resolvedAction.type === 'bomb');
+  const traced = bombTrace.resolvedAction;
+  assert.equal(Object.hasOwn(bombTrace.view, 'enhancedAI'), false);
   assert.deepEqual(calls[0], { x: traced.x, y: traced.y, ai: true });
   assert.equal(Object.hasOwn(traced, 'immediateWinOnly'), false);
 });

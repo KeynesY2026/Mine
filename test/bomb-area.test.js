@@ -14,6 +14,11 @@ function game(width = 15, height = 15) {
   return new Game({ width, height, mineCount: 0, bombCount: 1 });
 }
 
+test('53-mine game exposes the UI winning-score threshold', () => {
+  const board = new Game({ width: 15, height: 15, mineCount: 53, bombCount: 1 });
+  assert.equal(board.winNeed, 27);
+});
+
 test('bombAreaCells returns the full centered blast rectangle', () => {
   const board = game();
   assert.deepEqual(Array.from(board.bombAreaCells(7, 7)), Array.from({ length: 25 }, (_, i) =>

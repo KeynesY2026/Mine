@@ -287,7 +287,6 @@ function makeView(p, shared = getSharedAnalysis()) {
     remainMines: source.remainMines,
     bombs: source.bombs,
     canBomb: source.canBomb,
-    enhancedAI: $('cfgEnhancedAI').checked,
     bombRadiusH: source.bombRadiusH,
     bombRadiusV: source.bombRadiusV,
     turn: source.turn,
