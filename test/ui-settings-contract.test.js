@@ -8,15 +8,15 @@ const runtime = fs.readFileSync('scripts/ai-tournament-runtime.js', 'utf8');
 const core = fs.readFileSync('js/core.js', 'utf8');
 const css = fs.readFileSync('css/style.css', 'utf8');
 
-test('setup exposes bounded bomb inventory and the public-only AI bomb policy', () => {
-  assert.match(html, /id="cfgBombs"[^>]*max="999"/);
+test('setup caps bombs at 99 and retains the AI-bomb checkbox without technical help copy', () => {
+  assert.match(html, /id="cfgBombs"[^>]*max="99"/);
   assert.match(html, /id="cfgDisableAiBombs"/);
   assert.doesNotMatch(html, /cfgEnhancedAI|bomb-auto|immediateWinOnly/);
-  assert.match(html, /无敌 AI 可按公开联合命中分布评估炸弹直胜概率/);
-  assert.match(html, /估计不保证实际胜利/);
+  assert.doesNotMatch(html, /plugin-help|插件接口|makeDecision\(view\)|无敌 AI 可按公开联合命中分布|估计不保证实际胜利/);
   assert.doesNotMatch(html.match(/<input[^>]*id="cfgDisableAiBombs"[^>]*>/)?.[0] || '', /checked/);
   assert.doesNotMatch(html, /id="chkComBomb"/);
-  assert.match(html, /id="cfgSpeed"/);
+  assert.doesNotMatch(html, /id="cfgSpeed"/);
+  assert.match(html, /id="rngSpeed"/);
   assert.doesNotMatch(ui, /localStorage|sessionStorage/);
 });
 
@@ -54,7 +54,7 @@ test('AI receives a frozen shared public analysis and routes coordinate bombs di
   assert.match(ui, /MineAIPlanner\.chooseFallback/);
   assert.match(ui, /MineAIPlanner\.analyze\(snapshot,\s*\{\s*includeJointHitDistributions\s*\}\)/);
   assert.match(ui, /cfgDisableAiBombs/);
-  assert.match(html, /仅根据公开信息选择炸弹坐标/);
+  assert.doesNotMatch(html, /仅根据公开信息选择炸弹坐标/);
   assert.match(ui, /game\.bomb\([^,]+\.x,\s*[^,]+\.y,\s*\{\s*ai:\s*true\s*\}\)/);
   assert.doesNotMatch(ui, /bombBest|bomb-auto|immediateWinOnly/);
   assert.doesNotMatch(core, /bombBest\s*\(/);
@@ -90,7 +90,7 @@ test('human bomb mode shows a one-cell airplane icon without replacing the 5x5 p
   assert.match(iconRule, /height:\s*min\(var\(--cs\),\s*100%\)/);
   assert.match(iconRule, /pointer-events:\s*none/);
   assert.match(ui, /new Set\(game\.bombAreaCells\(bombPreviewCenter\.x, bombPreviewCenter\.y\)\)/);
-  assert.match(ui, /炸弹范围固定 5×5[^\n]*飞机图标/);
+  assert.match(ui, /选择轰炸中心 · 范围 5×5/);
 });
 
 test('human bomb mode rejects revealed centers with an explanatory toast', () => {
@@ -103,7 +103,7 @@ test('human bomb mode rejects revealed centers with an explanatory toast', () =>
 test('game-over announces the winning side and leaves the board available for review', () => {
   const onGameOver = ui.match(/function onGameOver\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 
-  assert.match(onGameOver, /victoryCelebration\.start\(label\(game\.winner\) \+ '获胜！'\)/);
+  assert.match(onGameOver, /victoryCelebration\.start\(game\.winner === 'draw' \? '本局平局' : label\(game\.winner\) \+ '获胜！'\)/);
   assert.doesNotMatch(onGameOver, /showModal|fillResult|dlgResult/);
   assert.doesNotMatch(html, /id="boardOverlay"|id="dlgResult"/);
 });
@@ -111,13 +111,18 @@ test('game-over announces the winning side and leaves the board available for re
 test('mine captures pulse in the scorer color and show a floating point while keeping ownership visible', () => {
   const render = ui.match(/function render\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 
-  assert.match(render, /lm\.kind === 'mine'[\s\S]*mine-capture/);
+  assert.match(render, /mineFeedback\.capturedMineIndices\(game\.lastMove, game\.mines, game\.owner\)/);
+  assert.match(render, /if \(mineCaptures\.has\(i\)\) cell\.classList\.add\('mine-capture'\)/);
+  assert.match(render, /const capture = mineCaptures\.has\(i\)/);
   assert.match(css, /\.cell\.mine\.owner-blue\s*\{[^}]*background:/);
   assert.match(css, /\.cell\.mine\.owner-red\s*\{[^}]*background:/);
   assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*content:\s*['"]\+1['"]/);
   assert.match(css, /\.cell\.mine-capture\s*\{[^}]*pointer-events:\s*none/);
   assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*pointer-events:\s*none/);
-  assert.match(css, /@keyframes mineCapture/);
+  assert.match(css, /\.cell\.blast\.mine-capture\s*\{[^}]*animation:\s*mineCapture\s+\.78s cubic-bezier\([^)]*\),\s*blast\s+\.45s ease-out/);
+  const mineCaptureFrames = css.match(/@keyframes mineCapture\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(mineCaptureFrames, /outline/);
+  assert.doesNotMatch(mineCaptureFrames, /(?:transform|box-shadow)\s*:/);
 });
 
 test('invalid decisions get a visible warning and legal fallback; no-move state stops', () => {

@@ -1,11 +1,11 @@
 "use strict";
 (() => {
-  function create(canvas, message, durationMs = 2500) {
+  function create(canvas, message) {
     const ctx = canvas.getContext('2d');
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches || false;
     let frame = null;
-    let startedAt = null;
+    let burstTimer = null;
     let lastAt = null;
-    let nextBurstAt = 0;
     let particles = [];
     let active = false;
     let width = 0;
@@ -23,10 +23,12 @@
     }
 
     function burst() {
-      const originX = width * (0.35 + Math.random() * 0.3);
-      const originY = height * (0.3 + Math.random() * 0.3);
+      if (width !== window.innerWidth || height !== window.innerHeight) resize();
+      particles = [];
+      const originX = width * (0.34 + Math.random() * 0.32);
+      const originY = height * (0.3 + Math.random() * 0.4);
       const color = colors[Math.floor(Math.random() * colors.length)];
-      const count = 44;
+      const count = 30;
       for (let i = 0; i < count; i++) {
         const angle = Math.PI * 2 * i / count + (Math.random() - 0.5) * 0.08;
         const speed = 1.5 + Math.random() * 4;
@@ -34,28 +36,18 @@
           x: originX, y: originY,
           vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
           age: 0, life: 650 + Math.random() * 450,
-          radius: 1.5 + Math.random() * 2, color,
+          radius: 2 + Math.random() * 3, color,
         });
       }
     }
 
     function draw(timestamp) {
+      frame = null;
       if (!active) return;
-      if (startedAt === null) startedAt = timestamp;
-      const elapsed = timestamp - startedAt;
       const delta = lastAt === null ? 16 : Math.min(timestamp - lastAt, 32);
       lastAt = timestamp;
       if (width !== window.innerWidth || height !== window.innerHeight) resize();
 
-      if (elapsed >= durationMs) {
-        stop();
-        return;
-      }
-
-      if (elapsed >= nextBurstAt) {
-        burst();
-        nextBurstAt += 380;
-      }
       ctx.clearRect(0, 0, width, height);
       particles = particles.filter(particle => {
         particle.age += delta;
@@ -71,13 +63,15 @@
         return true;
       });
       ctx.globalAlpha = 1;
-      frame = requestAnimationFrame(draw);
+      if (particles.length) frame = requestAnimationFrame(draw);
     }
 
     function stop() {
       active = false;
       if (frame !== null) cancelAnimationFrame(frame);
+      if (burstTimer !== null) clearInterval(burstTimer);
       frame = null;
+      burstTimer = null;
       particles = [];
       canvas.classList.remove('show');
       message.classList.remove('show');
@@ -87,14 +81,19 @@
     function start(winnerText) {
       stop();
       message.textContent = winnerText;
+      message.classList.add('show');
+      lastAt = null;
+      if (reducedMotion) return;
       resize();
       canvas.classList.add('show');
-      message.classList.add('show');
-      startedAt = null;
-      lastAt = null;
-      nextBurstAt = 0;
       active = true;
+      burst();
       frame = requestAnimationFrame(draw);
+      burstTimer = setInterval(() => {
+        if (!active) return;
+        burst();
+        if (frame === null) frame = requestAnimationFrame(draw);
+      }, 1400);
     }
 
     return { start, stop };

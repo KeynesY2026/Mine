@@ -13,26 +13,44 @@ function api() {
   return settings;
 }
 
-test('bomb count normalization accepts 0, 1, and 999 and clamps above the limit', () => {
+test('bomb count normalization accepts 0–99 and clamps larger values to 99', () => {
   const { normalizeBombCount } = api();
   assert.equal(normalizeBombCount(0), 0);
   assert.equal(normalizeBombCount(1), 1);
-  assert.equal(normalizeBombCount(999), 999);
-  assert.equal(normalizeBombCount(1000), 999);
+  assert.equal(normalizeBombCount(99), 99);
+  assert.equal(normalizeBombCount(100), 99);
   assert.equal(normalizeBombCount(-5), 0);
   assert.equal(normalizeBombCount('invalid'), 1);
 });
 
-test('manual mine count is odd and stays within a playable board range', () => {
+test('mine counts stay odd within the 10–99 square-board bounds', () => {
   const { normalizeMineCount } = api();
-  assert.equal(normalizeMineCount(10, 7, 7), 11);
-  assert.equal(normalizeMineCount(999, 7, 8), 53);
-  assert.equal(normalizeMineCount(99, 0, 0), 47);
-  assert.equal(normalizeMineCount(0, 7, 7), 1);
+  assert.equal(normalizeMineCount(10, 10, 10), 11);
+  assert.equal(normalizeMineCount(999, 0, 0), 97);
+  assert.equal(normalizeMineCount(999, 10, 99), 987);
+  assert.equal(normalizeMineCount(9999, 99, 99), 9799);
+  assert.equal(normalizeMineCount(0, 10, 10), 1);
 });
 
-test('bomb status formatting scales to large inventories without icon lists', () => {
-  const { formatBombStatus } = api();
-  assert.equal(formatBombStatus(999, 999), '剩余炸弹 999/999');
-  assert.equal(formatBombStatus(0, 0), '本局无炸弹');
+test('density-derived mine counts stay odd at minimum and maximum board sizes', () => {
+  const { resolveMineCount } = api();
+  assert.equal(resolveMineCount({ width: 15, height: 15, densityPercent: 23 }), 53);
+  assert.equal(resolveMineCount({ width: 10, height: 10, densityPercent: 10 }), 11);
+  assert.equal(resolveMineCount({ width: 99, height: 99, densityPercent: 90 }), 8821);
+});
+
+test('bomb inventory uses one icon per bomb below five and a multiplier from five onward', () => {
+  const { formatBombInventory } = api();
+  assert.deepEqual(JSON.parse(JSON.stringify(formatBombInventory(0))), {
+    iconCount: 0, multiplier: null, empty: true, label: '已用尽炸弹',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(formatBombInventory(4))), {
+    iconCount: 4, multiplier: null, empty: false, label: '剩余 4 枚炸弹',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(formatBombInventory(5))), {
+    iconCount: 1, multiplier: 5, empty: false, label: '剩余 5 枚炸弹',
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(formatBombInventory(100))), {
+    iconCount: 1, multiplier: 99, empty: false, label: '剩余 99 枚炸弹',
+  });
 });

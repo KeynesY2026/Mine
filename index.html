@@ -16,7 +16,14 @@
   </header>
   <main>
     <div id="boardWrap">
-      <div id="board"></div>
+      <div id="mineCounter" class="mine-counter" aria-live="polite" aria-label="棋盘剩余地雷数">
+        <span class="mine-counter-title"><span id="mineCounterIcon" aria-hidden="true"></span>雷区剩余</span>
+        <strong id="remainMines">--</strong><span class="mine-counter-unit">枚</span>
+      </div>
+      <div id="boardStage">
+        <div id="boardViewport"><div id="board"></div></div>
+        <div id="winnerMessage" role="status" aria-live="assertive" aria-atomic="true"></div>
+      </div>
     </div>
     <aside>
       <div class="player blue" id="panelBlue">
@@ -24,8 +31,8 @@
           <span class="pname">蓝方</span><span class="pkind" id="kindBlue">人类</span></div>
         <div class="scoreline"><span class="score" id="scoreBlue">0</span><span class="scoremax" id="maxBlue"></span></div>
         <div class="bar"><i id="barBlue" style="width:0%"></i></div>
-        <div class="bombs" id="bombsBlue"></div>
-        <div class="pstats">用时 <b id="timeBlue">0.0s</b> · 回合 <b id="roundBlue">0</b></div>
+        <div class="bombs" id="bombsBlue" role="img" aria-label="剩余炸弹"></div>
+        <div class="pstats"><span id="timeLabelBlue">人类用时</span> <b id="timeBlue">0:00</b> · 回合 <b id="roundBlue">0</b></div>
         <div class="thinking" id="thinkBlue">AI 思考中…</div>
       </div>
       <div class="player red" id="panelRed">
@@ -33,18 +40,18 @@
           <span class="pname">红方</span><span class="pkind" id="kindRed">强 AI</span></div>
         <div class="scoreline"><span class="score" id="scoreRed">0</span><span class="scoremax" id="maxRed"></span></div>
         <div class="bar"><i id="barRed" style="width:0%"></i></div>
-        <div class="bombs" id="bombsRed"></div>
-        <div class="pstats">用时 <b id="timeRed">0.0s</b> · 回合 <b id="roundRed">0</b></div>
+        <div class="bombs" id="bombsRed" role="img" aria-label="剩余炸弹"></div>
+        <div class="pstats"><span id="timeLabelRed">AI 用时</span> <b id="timeRed">0:00</b> · 回合 <b id="roundRed">0</b></div>
         <div class="thinking" id="thinkRed">AI 思考中…</div>
       </div>
       <div class="btnrow">
         <button class="primary" id="btnNewGame">新对局</button>
-        <button class="toggle bomb" id="btnBomb">💣 炸弹模式</button>
+        <button class="toggle bomb" id="btnBomb"><span id="bombButtonLabel">炸弹攻击</span><span id="bombButtonCount" class="bombs bomb-button-inventory" aria-hidden="true"></span><span id="bombButtonCountText" class="visually-hidden"></span></button>
         <button class="toggle" id="btnHint" hidden>概率提示</button>
         <button class="toggle" id="btnCheat" hidden>作弊模式</button>
         <button class="toggle" id="btnExportLog" hidden title="导出的本地 JSON 包含本局真实雷图">导出分析日志</button>
       </div>
-      <div id="bombGuide" class="bomb-guide" aria-live="polite"></div>
+      <div id="bombGuide" class="bomb-guide show" aria-live="polite"></div>
       <div class="ctl">
         <div class="ctltitle">设置</div>
         <label>AI 速度 <input type="range" id="rngSpeed" min="1" max="10" value="6"><span class="val" id="speedVal">6</span></label>
@@ -55,7 +62,13 @@
         <div class="mineinfo" id="rulesInfo" style="margin-top:0"></div>
       </div>
       <div class="ctl">
-        <div class="ctltitle">会话统计</div>
+        <div class="session-heading">
+          <div class="ctltitle">会话统计</div>
+          <details class="session-help">
+            <summary aria-label="会话统计说明">ⓘ</summary>
+            <div class="help-popover" role="note">胜、负、平和总局数只统计当前页面中已结束的对局；正在进行的对局不计入。刷新页面后统计归零。</div>
+          </details>
+        </div>
         <div class="session">
           <span>🔵 <b id="sessBlue">0</b></span>
           <span>🔴 <b id="sessRed">0</b></span>
@@ -65,46 +78,31 @@
       </div>
     </aside>
   </main>
-  <footer>
-    规则：点开雷 +1 分并继续回合；点开数字交换回合；0 格自动展开；落后方可用炸弹强开一片区域。先拿到超过半数雷者获胜。
-    解锁后右键点击棋盘切换概率提示 · 插件接口：<code>makeDecision(view)</code>（open 或带坐标的 bomb；无敌 AI 仅根据公开信息选择炸弹坐标）
-  </footer>
+  <footer>点开雷 +1 并续回合 · 点开数字或空格换回合 · 落后方可使用炸弹</footer>
 </div>
 
-<dialog id="dlgNewGame">
-  <div class="dlg-head"><h2>新对局设置</h2><span class="hint">修复了原版奇数雷 no-op bug</span></div>
+<dialog id="dlgNewGame" class="settings-dialog">
+  <div class="dlg-head"><h2>新对局</h2></div>
   <div class="dlg-body">
     <div class="frow">
-      <div class="fld"><label>宽度 (7–35)</label><input type="number" id="cfgW" min="7" max="35" value="15"></div>
-      <div class="fld"><label>高度 (7–35)</label><input type="number" id="cfgH" min="7" max="35" value="15"></div>
-      <div class="fld"><label>雷密度 % (10–90)</label><input type="number" id="cfgPct" min="10" max="90" value="23"></div>
-      <div class="fld"><label>雷数（自动奇数）</label><input type="number" id="cfgMines" min="1" value="53"></div>
-      <div class="fld"><label>每人炸弹 (0–999)</label><input type="number" id="cfgBombs" min="0" max="999" value="1"></div>
-      <div class="fld"><label>AI 速度 (1–10)</label><input type="number" id="cfgSpeed" min="1" max="10" value="6"></div>
+      <div class="fld"><label for="cfgSize">棋盘大小 (10–99)</label><input type="number" id="cfgSize" min="10" max="99" value="15"></div>
+      <div class="fld"><label for="cfgBombs">每人炸弹 (0–99)</label><input type="number" id="cfgBombs" min="0" max="99" value="1"></div>
+    </div>
+    <div class="fld density-field">
+      <div class="density-heading"><label for="cfgPct">雷密度</label><output id="cfgPctValue" for="cfgPct">23%</output></div>
+      <input type="range" id="cfgPct" min="10" max="90" value="23" aria-describedby="autoMineSummary">
+      <div id="autoMineSummary" class="density-summary">生成 53 枚奇数雷</div>
     </div>
     <div class="settings-options">
       <label><input type="checkbox" id="cfgDisableAiBombs"> 禁用 AI 使用炸弹</label>
-      <div class="mineinfo" style="margin-top:0">无敌 AI 可按公开联合命中分布评估炸弹直胜概率；公开模型估计不保证实际胜利。</div>
     </div>
     <div class="pblock blue">
       <div class="pt">蓝方（先手）</div>
-      <div class="prow">
-        <select id="cfgBlueKind"></select>
-      </div>
-      <div id="descBlueKind" class="ai-description" aria-live="polite"></div>
+      <div class="prow"><select id="cfgBlueKind"></select></div>
     </div>
     <div class="pblock red">
       <div class="pt">红方</div>
-      <div class="prow">
-        <select id="cfgRedKind"></select>
-      </div>
-      <div id="descRedKind" class="ai-description" aria-live="polite"></div>
-    </div>
-    <div class="plugin-help">
-      AI 名称与文件由 <code>plugin/ai-config.js</code> 配置；只有对局中选用的 AI 才会动态加载。<br>
-      新插件实现 <code>makeDecision(view)</code>，并注册 <code>window.MineAIPlugins.register('id', makeDecision)</code>；再在配置文件中添加对应路径、ID 和显示名。<br>
-      返回 <code>{type:'open'|'bomb', x, y}</code> 或 null；无敌 AI 仅依据公开信息估算炸弹直胜概率与期望收益，实际命中由引擎在行动后结算。view 含 <code>width height score oppScore mineCount remainMines bombs canBomb bombRadiusH bombRadiusV turn analysis</code>
-      及 <code>cellAt(x,y)</code>（-2 未翻开 / -1 已翻开雷 / 0–8 已翻开数字）；<code>analysis</code> 是当前公开棋盘共享的只读概率快照。
+      <div class="prow"><select id="cfgRedKind"></select></div>
     </div>
   </div>
   <div class="dlg-foot">
@@ -114,7 +112,6 @@
 </dialog>
 
 <canvas id="victoryFireworks" aria-hidden="true"></canvas>
-<div id="winnerMessage" role="status" aria-live="assertive" aria-atomic="true"></div>
 <div id="toast"></div>
 
 <script src="js/core.js"></script>
@@ -126,4 +123,8 @@
 <script src="js/key-sequence.js"></script>
 <script src="js/diagnostic-log.js"></script>
 <script src="js/victory-celebration.js"></script>
+<script src="js/turn-timer.js"></script>
+<script src="js/mine-feedback.js"></script>
+<script src="js/mine-icons.js"></script>
+<script src="js/board-layout.js"></script>
 <script src="js/ui.js"></script>

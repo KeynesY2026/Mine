@@ -8,6 +8,10 @@ const C = MineCore;
 const aiRegistry = MineAIRegistry.create(C, window.MineAIConfig);
 const decisionGuard = MineAIDecision;
 const gameSettings = MineGameSettings;
+const mineFeedback = MineFeedback;
+const mineIcons = MineIcons;
+const boardLayout = MineBoardLayout;
+const humanTimer = MineTurnTimer.create(() => performance.now());
 const keySequence = MineKeySequence.create('cheat', 1500);
 const $ = id => document.getElementById(id);
 const victoryCelebration = MineVictoryCelebration.create($('victoryFireworks'), $('winnerMessage'));
@@ -23,12 +27,13 @@ let hintOn = false, cheatOn = false;
 let hintTogglePending = false;
 let analysisCache = null;
 let bombPreviewCenter = null;
+let bombPreviewCells = new Set();
 let aiTimer = null;
 let timers = { blue: 0, red: 0 };               // AI 思考耗时 ms
 let session = { blue: 0, red: 0, draw: 0, total: 0 };
 
 const boardEl = $('board');
-const boardWrap = $('boardWrap');
+const boardViewport = $('boardViewport');
 
 function toast(msg, err, flash = false, durationMs = flash ? 1500 : 2400) {
   const t = $('toast');
@@ -42,14 +47,15 @@ function toast(msg, err, flash = false, durationMs = flash ? 1500 : 2400) {
 function layout() {
   if (!game) return;
   const w = game.w, h = game.h;
-  const availW = boardWrap.clientWidth - 36, availH = boardWrap.clientHeight - 36;
-  const cs = Math.max(16, Math.min(44,
-    Math.floor(Math.min((availW - (w - 1) * 3 - 16) / w, (availH - (h - 1) * 3 - 16) / h))));
+  const cs = boardLayout.cellSize(w, h, boardViewport.clientWidth, boardViewport.clientHeight);
   document.documentElement.style.setProperty('--cs', cs + 'px');
   boardEl.style.gridTemplateColumns = `repeat(${w}, var(--cs))`;
+  boardEl.style.gridTemplateRows = `repeat(${h}, var(--cs))`;
 }
 
 function buildBoard() {
+  bombPreviewCenter = null;
+  bombPreviewCells.clear();
   boardEl.innerHTML = '';
   const w = game.w, h = game.h;
   layout();
@@ -61,8 +67,7 @@ function buildBoard() {
     d.addEventListener('click', () => onCellClick(x, y));
     d.addEventListener('pointerenter', () => {
       if (!game.bombMode) return;
-      bombPreviewCenter = { x, y };
-      render();
+      updateBombPreview(x, y);
     });
     frag.appendChild(d);
   }
@@ -85,29 +90,60 @@ function toggleHint() {
   }
 }
 
-boardWrap.addEventListener('contextmenu', e => {
+boardViewport.addEventListener('contextmenu', e => {
   e.preventDefault();
   toggleHint();
 });
-boardEl.addEventListener('pointerleave', () => {
-  if (!bombPreviewCenter) return;
-  bombPreviewCenter = null;
-  render();
-});
-window.addEventListener('resize', () => { layout(); });
+boardEl.addEventListener('pointerleave', clearBombPreview);
+const boardResizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(layout) : null;
+if (boardResizeObserver) boardResizeObserver.observe(boardViewport);
+window.addEventListener('resize', layout);
 
 const cellEl = i => boardEl.children[i];
+
+function updateBombPreview(x, y) {
+  if (!game || !game.bombMode) return;
+  if (bombPreviewCenter?.x === x && bombPreviewCenter?.y === y) return;
+  const nextPreviewCells = new Set(game.bombAreaCells(x, y));
+  for (const i of bombPreviewCells) {
+    if (!nextPreviewCells.has(i)) cellEl(i)?.classList.remove('bomb-preview');
+  }
+  for (const i of nextPreviewCells) {
+    if (!bombPreviewCells.has(i)) cellEl(i)?.classList.add('bomb-preview');
+  }
+  const previousCenter = bombPreviewCenter ? bombPreviewCenter.y * game.w + bombPreviewCenter.x : -1;
+  const nextCenter = y * game.w + x;
+  if (previousCenter !== nextCenter) {
+    if (previousCenter >= 0) cellEl(previousCenter)?.classList.remove('bomb-preview-center');
+    cellEl(nextCenter)?.classList.add('bomb-preview-center');
+  }
+  bombPreviewCenter = { x, y };
+  bombPreviewCells = nextPreviewCells;
+}
+
+function clearBombPreview() {
+  for (const i of bombPreviewCells) cellEl(i)?.classList.remove('bomb-preview');
+  if (bombPreviewCenter) {
+    const center = bombPreviewCenter.y * game.w + bombPreviewCenter.x;
+    cellEl(center)?.classList.remove('bomb-preview-center');
+  }
+  bombPreviewCells.clear();
+  bombPreviewCenter = null;
+}
 
 /* ---------------- 渲染 ---------------- */
 function render() {
   if (!game) return;
   document.body.classList.toggle('bombing', game.bombMode);
+  if (!game.bombMode) bombPreviewCenter = null;
   const previewCells = game.bombMode && bombPreviewCenter
     ? new Set(game.bombAreaCells(bombPreviewCenter.x, bombPreviewCenter.y)) : null;
+  bombPreviewCells = previewCells || new Set();
   let analysis = null;
   if (hintOn) {
     try { analysis = getSharedAnalysis().analysis; } catch (e) { analysis = null; }
   }
+  const mineCaptures = new Set(mineFeedback.capturedMineIndices(game.lastMove, game.mines, game.owner));
   for (let i = 0; i < game.total; i++) {
     const el = cellEl(i);
     const x = i % game.w, y = Math.floor(i / game.w);
@@ -137,7 +173,9 @@ function render() {
       el.className = 'cell revealed mine owner-' + (game.owner[i] === 1 ? 'blue' : game.owner[i] === 2 ? 'red' : '')
         + (previewCells && previewCells.has(i) ? ' bomb-preview' : '')
         + (game.bombMode && bombPreviewCenter && i === bombPreviewCenter.y * game.w + bombPreviewCenter.x ? ' bomb-preview-center' : '');
-      el.innerHTML = '<span class="num" style="font-size:calc(var(--cs)*.55)">💣</span>';
+      const owner = game.owner[i] === 1 ? 'blue' : game.owner[i] === 2 ? 'red' : null;
+      const capture = mineCaptures.has(i);
+      el.innerHTML = '<span class="mine-emblem">' + mineIcons.mineSvg(owner, capture) + '</span>';
     } else {
       el.className = 'cell revealed n' + game.numbers[i] + ' owner-' + (game.owner[i] === 1 ? 'blue' : game.owner[i] === 2 ? 'red' : '')
         + (previewCells && previewCells.has(i) ? ' bomb-preview' : '')
@@ -153,7 +191,7 @@ function render() {
     for (const i of targets) if (i >= 0 && i < game.total) {
       const cell = cellEl(i);
       cell.classList.add('lastmove', who);
-      if (lm.kind === 'mine') cell.classList.add('mine-capture');
+      if (mineCaptures.has(i)) cell.classList.add('mine-capture');
     }
   }
   updateHUD();
@@ -182,8 +220,9 @@ function updateHUD() {
     $('score' + cap).textContent = game.scores[p];
     $('max' + cap).textContent = '/ 胜线 ' + game.winNeed;
     $('bar' + cap).style.width = Math.min(100, game.scores[p] / game.winNeed * 100) + '%';
-    $('bombs' + cap).textContent = gameSettings.formatBombStatus(game.bombs[p], game.bombMax);
-    $('time' + cap).textContent = (timers[p] / 1000).toFixed(1) + 's';
+    renderBombInventory($('bombs' + cap), game.bombs[p]);
+    $('timeLabel' + cap).textContent = isAI(p) ? 'AI 用时' : '人类用时';
+    $('time' + cap).textContent = formatClock(isAI(p) ? timers[p] : humanTimer.elapsed(p));
     $('round' + cap).textContent = game.rounds[p];
     $('panel' + cap).classList.toggle('active', !game.over && game.turn === p);
     $('think' + cap).classList.toggle('show', !game.over && game.turn === p && isAI(p));
@@ -191,20 +230,69 @@ function updateHUD() {
     $('kind' + cap).textContent = agent ? agent.label : 'AI 缺失';
   }
   const bb = $('btnBomb');
-  bb.disabled = !game || game.over;
-  bb.className = 'toggle bomb' + (game && game.bombMode ? ' on' : '')
-    + (!game.over && game.canBomb(game.turn, { ai: isAI(game.turn) }) ? ' ready' : '');
-  bb.textContent = game.bombMode ? '💣 取消炸弹' : '💣 炸弹模式';
-  $('bombGuide').classList.toggle('show', game.bombMode);
+  const canBomb = !game.over && game.canBomb(game.turn, { ai: isAI(game.turn) });
+  bb.disabled = !game || game.over || (!game.bombMode && (isAI(game.turn) || !canBomb));
+  bb.className = 'toggle bomb' + (game.bombMode ? ' on' : '') + (canBomb && !game.bombMode ? ' ready' : '');
+  $('bombButtonLabel').textContent = game.bombMode ? '取消攻击' : '炸弹攻击';
+  renderBombInventory($('bombButtonCount'), game.bombs[game.turn]);
+  $('bombButtonCountText').textContent = '当前回合剩余炸弹 ' + game.bombs[game.turn] + ' 枚';
+  $('bombGuide').classList.add('show');
   $('bombGuide').textContent = game.bombMode
-    ? '炸弹范围固定 5×5（边缘会裁切）· 飞机图标标记轰炸中心，红色区域为范围 · 点击未翻开的中心引爆 · 再点按钮取消 · 剩余 ' + game.bombs[game.turn] + ' 枚'
-    : '';
+    ? '选择轰炸中心 · 范围 5×5（边缘裁切）；点击未翻开的格子引爆，再按按钮取消。'
+    : isAI(game.turn) ? '等待人类回合后使用炸弹。'
+      : game.bombs[game.turn] <= 0 ? '炸弹库存已用尽。'
+        : canBomb ? '可用 · 攻击范围 5×5。'
+          : '仅落后时可用；落后后可攻击 5×5 区域。';
   $('mineInfo').innerHTML = game.w + '×' + game.h + ' · 雷 <b>' + game.mineCount + '</b> · 胜线 <b>' + game.winNeed + '</b> · 炸弹 <b>5×5</b>';
-  $('rulesInfo').textContent = '点开雷 +1 并续回合 · 点开数字/0 格换回合 · 落后方可炸弹 · 剩雷 ' + game.remainMines;
+  $('remainMines').textContent = game.remainMines;
+  $('mineCounter').setAttribute('aria-label', '棋盘剩余地雷 ' + game.remainMines + ' 枚');
+  $('rulesInfo').textContent = '点开雷 +1 并续回合 · 点开数字/0 格换回合 · 落后方可使用炸弹。';
   $('sessBlue').textContent = session.blue;
   $('sessRed').textContent = session.red;
   $('sessDraw').textContent = session.draw;
   $('sessTotal').textContent = session.total;
+}
+
+function renderBombInventory(container, remaining) {
+  const display = gameSettings.formatBombInventory(remaining);
+  container.innerHTML = '';
+  container.setAttribute('role', 'img');
+  container.setAttribute('aria-label', display.label);
+  container.title = display.label;
+  if (display.empty) {
+    const empty = document.createElement('span');
+    empty.className = 'bombs-empty';
+    empty.textContent = '已用尽';
+    container.appendChild(empty);
+    return;
+  }
+  for (let i = 0; i < display.iconCount; i++) {
+    const icon = document.createElement('span');
+    icon.className = 'bomb-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = mineIcons.bombSvg();
+    container.appendChild(icon);
+  }
+  if (display.multiplier !== null) {
+    const multiplier = document.createElement('span');
+    multiplier.className = 'bomb-multiplier';
+    multiplier.textContent = '×' + display.multiplier;
+    container.appendChild(multiplier);
+  }
+}
+
+function formatClock(milliseconds) {
+  const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
+  return Math.floor(seconds / 60) + ':' + String(seconds % 60).padStart(2, '0');
+}
+
+function updateTimeDisplays() {
+  if (!game) return;
+  for (const p of ['blue', 'red']) {
+    const cap = p === 'blue' ? 'Blue' : 'Red';
+    $('timeLabel' + cap).textContent = isAI(p) ? 'AI 用时' : '人类用时';
+    $('time' + cap).textContent = formatClock(isAI(p) ? timers[p] : humanTimer.elapsed(p));
+  }
 }
 
 function isAI(p) { return kind[p] !== 'human'; }
@@ -249,9 +337,10 @@ function onCellClick(x, y) {
 }
 
 function afterMove(r, extraDelay) {
+  humanTimer.endTurn(game.lastMove?.player, game.turn, !game.over && !isAI(game.turn), game.over);
   boardRevision++;
   analysisCache = null;
-  if (r.kind === 'bomb') bombPreviewCenter = null;
+  if (r.kind === 'bomb') clearBombPreview();
   render();
   // 涟漪动画: 洪水填充按距离延迟
   if (r.cells && r.kind === 'empty' && r.x !== undefined) {
@@ -269,7 +358,7 @@ function afterMove(r, extraDelay) {
     for (const i of r.cells) {
       if (game.mines[i]) {
         cellEl(i).classList.add('blast');
-        setTimeout(el => el.classList.remove('blast'), 500, cellEl(i));
+        setTimeout(el => el.classList.remove('blast'), 800, cellEl(i));
       }
     }
   }
@@ -466,7 +555,7 @@ function onGameOver() {
   else session.draw++;
   updateHUD();
   if (game.winner === 'draw') toast('本局平局', false, false, 2000);
-  else victoryCelebration.start(label(game.winner) + '获胜！');
+  victoryCelebration.start(game.winner === 'draw' ? '本局平局' : label(game.winner) + '获胜！');
 }
 
 function exportDiagnosticLog() {
@@ -497,30 +586,31 @@ function exportDiagnosticLog() {
 
 /* ---------------- 新对局 / 设置 ---------------- */
 function syncMineField() {
-  const w = Math.round(C.clamp(+$('cfgW').value || 15, 7, 35));
-  const h = Math.round(C.clamp(+$('cfgH').value || 15, 7, 35));
-  const pct = C.clamp(+$('cfgPct').value || 23, 10, 90);
-  $('cfgW').value = w;
-  $('cfgH').value = h;
+  const size = Math.round(C.clamp(+$('cfgSize').value || 15, 10, 99));
+  const pct = Math.round(C.clamp(+$('cfgPct').value || 23, 10, 90));
+  $('cfgSize').value = size;
   $('cfgPct').value = pct;
-  $('cfgMines').value = gameSettings.normalizeMineCount(w * h * pct / 100, w, h);
+  $('cfgPctValue').textContent = pct + '%';
+  $('cfgPct').style.setProperty('--density-progress', ((pct - 10) / 80 * 100) + '%');
+  const mineCount = gameSettings.resolveMineCount({ width: size, height: size, densityPercent: pct });
+  $('autoMineSummary').textContent = '生成 ' + mineCount + ' 枚奇数雷';
 }
 
 function newGame() {
   clearTimeout(aiTimer);
+  victoryCelebration.stop();
   boardRevision++;
   analysisCache = null;
+  syncMineField();
   $('dlgNewGame').close();
-  const w = Math.round(C.clamp(+$('cfgW').value || 15, 7, 35));
-  const h = Math.round(C.clamp(+$('cfgH').value || 15, 7, 35));
-  const pct = C.clamp(+$('cfgPct').value || 23, 10, 90);
-  const requestedMines = $('cfgMines').value === '' ? w * h * pct / 100 : $('cfgMines').value;
-  const m = gameSettings.normalizeMineCount(requestedMines, w, h);
+  const size = Math.round(C.clamp(+$('cfgSize').value || 15, 10, 99));
+  const pct = Math.round(C.clamp(+$('cfgPct').value || 23, 10, 90));
+  const m = gameSettings.resolveMineCount({ width: size, height: size, densityPercent: pct });
   const bombs = gameSettings.normalizeBombCount($('cfgBombs').value);
-  $('cfgW').value = w; $('cfgH').value = h; $('cfgPct').value = pct;
-  $('cfgMines').value = m; $('cfgBombs').value = bombs;
-  speed = C.clamp(+$('cfgSpeed').value || 6, 1, 10);
-  $('cfgSpeed').value = speed;
+  $('cfgSize').value = size; $('cfgPct').value = pct;
+  $('cfgPctValue').textContent = pct + '%';
+  $('cfgBombs').value = bombs;
+  speed = C.clamp(+$('rngSpeed').value || 6, 1, 10);
   $('rngSpeed').value = speed; $('speedVal').textContent = speed;
   kind.blue = $('cfgBlueKind').value;
   kind.red = $('cfgRedKind').value;
@@ -532,16 +622,18 @@ function newGame() {
   $('btnExportLog').hidden = true;
   document.body.classList.remove('bombing');
   game = new C.Game({
-    width: w,
-    height: h,
+    width: size,
+    height: size,
     mineCount: m,
     bombCount: bombs,
     disableAiBombs: $('cfgDisableAiBombs').checked,
   });
+  humanTimer.reset();
+  if (!isAI(game.turn)) humanTimer.start(game.turn);
   gameLog = MineDiagnosticLog.createGameLog({
     startedAt: new Date().toISOString(),
-    width: w,
-    height: h,
+    width: size,
+    height: size,
     settings: {
       mineCount: m,
       bombCount: bombs,
@@ -580,20 +672,17 @@ function refreshAgentOptions() {
 
     const preferred = previous || aiRegistry.defaultBySide[side] || 'human';
     select.value = aiRegistry.get(preferred) ? preferred : 'human';
-    const description = $('desc' + cap + 'Kind');
-    description.textContent = aiRegistry.get(select.value)?.description || '';
-    select.addEventListener('change', () => {
-      description.textContent = aiRegistry.get(select.value)?.description || '';
-    });
+
   }
 }
 
 /* ---------------- 初始化 ---------------- */
 document.addEventListener('DOMContentLoaded', () => {
+  $('mineCounterIcon').innerHTML = mineIcons.counterMineSvg();
   $('btnNewGame').addEventListener('click', () => $('dlgNewGame').showModal());
   $('btnNewOk').addEventListener('click', newGame);
   $('btnNewCancel').addEventListener('click', () => $('dlgNewGame').close());
-  ['cfgW', 'cfgH', 'cfgPct'].forEach(id => $(id).addEventListener('input', syncMineField));
+  ['cfgSize', 'cfgPct'].forEach(id => $(id).addEventListener('input', syncMineField));
   $('btnHint').addEventListener('click', toggleHint);
   $('btnCheat').addEventListener('click', () => {
     if (!keySequence.isUnlocked()) return;
@@ -615,7 +704,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isAI(game.turn)) { toast('AI 回合中，无法切换炸弹模式', true); return; }
     if (game.bombMode) {
       game.setBombMode(false);
-      bombPreviewCenter = null;
+      clearBombPreview();
       document.body.classList.remove('bombing');
       render();
       return;
@@ -624,24 +713,18 @@ document.addEventListener('DOMContentLoaded', () => {
       toast('炸弹仅落后时可用 (当前 蓝 ' + game.scores.blue + ' : ' + game.scores.red + ' 红)，剩 ' + game.bombs[game.turn] + ' 枚', true);
       return;
     }
-    bombPreviewCenter = null;
+    clearBombPreview();
     document.body.classList.add('bombing');
     toast('炸弹模式已开启：移动鼠标预览范围，点击中心引爆');
     render();
   });
   $('rngSpeed').addEventListener('input', e => {
-    speed = +e.target.value;
-    $('cfgSpeed').value = speed;
-    $('speedVal').textContent = speed;
-  });
-  $('cfgSpeed').addEventListener('input', e => {
     speed = C.clamp(+e.target.value || 6, 1, 10);
-    $('cfgSpeed').value = speed;
-    $('rngSpeed').value = speed;
     $('speedVal').textContent = speed;
   });
   refreshAgentOptions();
   syncMineField();
+  setInterval(updateTimeDisplays, 200);
   newGame();
 });
 /* 调试句柄 (控制台/自动化用) */
