@@ -119,7 +119,7 @@ test('mine captures pulse in the scorer color and show a floating point while ke
   assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*content:\s*['"]\+1['"]/);
   assert.match(css, /\.cell\.mine-capture\s*\{[^}]*pointer-events:\s*none/);
   assert.match(css, /\.cell\.mine-capture::before\s*\{[^}]*pointer-events:\s*none/);
-  assert.match(css, /\.cell\.blast\.mine-capture\s*\{[^}]*animation:\s*mineCapture\s+\.78s cubic-bezier\([^)]*\),\s*blast\s+\.45s ease-out/);
+  assert.match(css, /\.cell\.blast\.mine-capture\s*\{[^}]*animation:\s*mineCapture\s+\.78s cubic-bezier\([^)]*\),\s*blast\s+1\.45s ease-out/);
   const mineCaptureFrames = css.match(/@keyframes mineCapture\s*\{([\s\S]*?)\n\}/)?.[1] || '';
   assert.match(mineCaptureFrames, /outline/);
   assert.doesNotMatch(mineCaptureFrames, /(?:transform|box-shadow)\s*:/);

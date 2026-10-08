@@ -15,6 +15,7 @@ const humanTimer = MineTurnTimer.create(() => performance.now());
 const keySequence = MineKeySequence.create('cheat', 1500);
 const $ = id => document.getElementById(id);
 const victoryCelebration = MineVictoryCelebration.create($('victoryFireworks'), $('winnerMessage'));
+const audioFeedback = MineAudioFeedback.create();
 const label = p => (p === 'blue' ? '蓝方' : '红方');
 const other = p => (p === 'blue' ? 'red' : 'blue');
 
@@ -41,6 +42,15 @@ function toast(msg, err, flash = false, durationMs = flash ? 1500 : 2400) {
   t.className = 'show' + (err ? ' err' : '') + (flash ? ' flash' : '');
   clearTimeout(t._t);
   t._t = setTimeout(() => t.className = '', durationMs);
+}
+
+function syncSoundButton() {
+  const button = $('btnSound');
+  const enabled = audioFeedback.isEnabled();
+  button.setAttribute('aria-pressed', String(enabled));
+  button.setAttribute('aria-label', enabled ? '关闭音效' : '开启音效');
+  button.firstElementChild.textContent = enabled ? '🔊' : '🔇';
+  button.lastElementChild.textContent = enabled ? '音效开' : '音效关';
 }
 
 /* ---------------- 棋盘构建 ---------------- */
@@ -81,6 +91,7 @@ function toggleHint() {
     hintOn = !hintOn;
     $('btnHint').classList.toggle('on', hintOn);
     render();
+    audioFeedback.play('click');
     return true;
   } catch (error) {
     toast('概率分析失败: ' + error.message, true);
@@ -337,6 +348,9 @@ function onCellClick(x, y) {
 }
 
 function afterMove(r, extraDelay) {
+  if (r.kind === 'bomb') audioFeedback.play('bomb');
+  else if (r.kind === 'mine') audioFeedback.play('mine');
+  else audioFeedback.play('open');
   humanTimer.endTurn(game.lastMove?.player, game.turn, !game.over && !isAI(game.turn), game.over);
   boardRevision++;
   analysisCache = null;
@@ -354,11 +368,11 @@ function afterMove(r, extraDelay) {
   }
   if (r.kind === 'bomb' && r.cells) {
     boardEl.classList.add('shake');
-    setTimeout(() => boardEl.classList.remove('shake'), 450);
+    setTimeout(() => boardEl.classList.remove('shake'), 1050);
     for (const i of r.cells) {
       if (game.mines[i]) {
         cellEl(i).classList.add('blast');
-        setTimeout(el => el.classList.remove('blast'), 800, cellEl(i));
+        setTimeout(el => el.classList.remove('blast'), 1500, cellEl(i));
       }
     }
   }
@@ -555,6 +569,7 @@ function onGameOver() {
   else session.draw++;
   updateHUD();
   if (game.winner === 'draw') toast('本局平局', false, false, 2000);
+  if (game.winner !== 'draw') audioFeedback.play('victory');
   victoryCelebration.start(game.winner === 'draw' ? '本局平局' : label(game.winner) + '获胜！');
 }
 
@@ -679,19 +694,40 @@ function refreshAgentOptions() {
 /* ---------------- 初始化 ---------------- */
 document.addEventListener('DOMContentLoaded', () => {
   $('mineCounterIcon').innerHTML = mineIcons.counterMineSvg();
-  $('btnNewGame').addEventListener('click', () => $('dlgNewGame').showModal());
-  $('btnNewOk').addEventListener('click', newGame);
-  $('btnNewCancel').addEventListener('click', () => $('dlgNewGame').close());
+  syncSoundButton();
+  $('btnSound').addEventListener('click', () => {
+    if (audioFeedback.toggle()) audioFeedback.play('click');
+    syncSoundButton();
+  });
+  $('btnNewGame').addEventListener('click', () => {
+    audioFeedback.play('click');
+    $('dlgNewGame').showModal();
+  });
+  $('btnNewOk').addEventListener('click', () => {
+    audioFeedback.play('click');
+    newGame();
+  });
+  $('btnNewCancel').addEventListener('click', () => {
+    audioFeedback.play('click');
+    $('dlgNewGame').close();
+  });
+  $('dlgNewGame').addEventListener('change', e => {
+    if (e.target.matches('input, select')) audioFeedback.play('click');
+  });
   ['cfgSize', 'cfgPct'].forEach(id => $(id).addEventListener('input', syncMineField));
   $('btnHint').addEventListener('click', toggleHint);
   $('btnCheat').addEventListener('click', () => {
     if (!keySequence.isUnlocked()) return;
+    audioFeedback.play('click');
     cheatOn = !cheatOn;
     $('btnCheat').classList.toggle('on', cheatOn);
     $('btnExportLog').hidden = !cheatOn;
     render();
   });
-  $('btnExportLog').addEventListener('click', exportDiagnosticLog);
+  $('btnExportLog').addEventListener('click', () => {
+    audioFeedback.play('click');
+    exportDiagnosticLog();
+  });
   window.addEventListener('keydown', e => {
     if (keySequence.push(e.key, Date.now(), e)) {
       $('btnHint').hidden = false;
@@ -703,6 +739,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!game || game.over) return;
     if (isAI(game.turn)) { toast('AI 回合中，无法切换炸弹模式', true); return; }
     if (game.bombMode) {
+      audioFeedback.play('click');
       game.setBombMode(false);
       clearBombPreview();
       document.body.classList.remove('bombing');
@@ -714,6 +751,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     clearBombPreview();
+    audioFeedback.play('click');
     document.body.classList.add('bombing');
     toast('炸弹模式已开启：移动鼠标预览范围，点击中心引爆');
     render();
@@ -722,6 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
     speed = C.clamp(+e.target.value || 6, 1, 10);
     $('speedVal').textContent = speed;
   });
+  $('rngSpeed').addEventListener('change', () => audioFeedback.play('click'));
   refreshAgentOptions();
   syncMineField();
   setInterval(updateTimeDisplays, 200);

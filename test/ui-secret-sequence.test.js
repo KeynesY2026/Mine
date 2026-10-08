@@ -33,6 +33,7 @@ function loadUiGate() {
     MineBoardLayout: { cellSize: () => 24 },
     MineTurnTimer: { create: () => ({}) },
     MineVictoryCelebration: { create: () => ({}) },
+    MineAudioFeedback: { create: () => ({ isEnabled: () => true, toggle: () => true, play: () => true }) },
     setTimeout() { return 1; },
     clearTimeout() {},
   };
