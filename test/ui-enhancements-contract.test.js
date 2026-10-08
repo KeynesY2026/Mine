@@ -107,7 +107,24 @@ test('compact screens keep a useful board viewport and allow vertical page scrol
   assert.match(compactRules, /#app\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*100vh/);
   assert.match(compactRules, /main\s*\{[^}]*flex:\s*0 0 auto/);
   assert.match(compactRules, /#boardWrap\s*\{[^}]*flex:\s*0 0 auto/);
-  assert.match(compactRules, /#boardStage\s*\{[^}]*height:\s*clamp\(220px,\s*45vh,\s*420px\)/);
+  assert.match(compactRules, /#boardStage\s*\{[^}]*height:\s*clamp\(260px,\s*48svh,\s*440px\)/);
+});
+
+test('mobile layout separates the status row, keeps both players visible, and provides touch-sized controls', () => {
+  const compactRules = css.match(/@media \(max-width:\s*760px\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(compactRules, /header\s*\{[^}]*flex-wrap:\s*wrap/);
+  assert.match(compactRules, /#lastMoveBar\s*\{[^}]*flex:\s*1\s+0\s+100%/);
+  assert.match(compactRules, /aside\s+\.player\s*\{[^}]*flex:\s*1\s+1\s+calc\(50%/);
+  assert.match(compactRules, /\.btnrow,\s*\.bomb-guide,\s*\.ctl\s*\{[^}]*flex:\s*1\s+1\s+100%/);
+  assert.match(compactRules, /button\s*\{[^}]*min-height:\s*44px/);
+  assert.match(compactRules, /#boardStage\s*\{[^}]*min-height:\s*260px/);
+  assert.match(compactRules, /#boardStage\s*\{[^}]*svh/);
+});
+
+test('mobile controls fill one shared width and action buttons use equal columns', () => {
+  const compactRules = css.match(/@media \(max-width:\s*760px\)\s*\{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(compactRules, /\.btnrow,\s*\.bomb-guide,\s*\.ctl\s*\{[^}]*width:\s*100%/);
+  assert.match(compactRules, /\.btnrow\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
 });
 
 test('winner overlay remains centered while the oversized board scrolls independently', () => {

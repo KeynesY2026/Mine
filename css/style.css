@@ -329,17 +329,25 @@ dialog::backdrop { background: #06081099; backdrop-filter: blur(3px); }
 @media (max-width: 760px) {
   body { overflow-x: hidden; overflow-y: auto; }
   #app { height: auto; min-height: 100vh; }
-  header { gap: 8px; padding: 8px 10px; }
+  header { flex-wrap: wrap; gap: 8px; padding: 8px 10px; }
   header .sub { display: none; }
-  #lastMoveBar { max-width: 42vw; padding: 5px 8px; }
-  #btnSound { padding: 6px 8px; }
+  #turnBadge { order: 1; padding: 6px 10px; }
+  #btnSound { order: 2; padding: 6px 8px; }
   #btnSound .sound-label { display: none; }
+  #lastMoveBar { order: 3; flex: 1 0 100%; max-width: none; margin-left: 0; padding: 5px 8px; }
   main { flex: 0 0 auto; flex-direction: column; }
   #boardWrap { flex: 0 0 auto; gap: 6px; padding: 6px; }
-  #boardStage { flex: 0 0 auto; height: clamp(220px, 45vh, 420px); }
-  aside { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; border-left: none; border-top: 1px solid var(--line); padding: 8px; gap: 8px; }
-  aside .player { flex: 1 1 200px; }
+  #boardStage { flex: 0 0 auto; height: clamp(260px, 48vh, 440px); height: clamp(260px, 48svh, 440px); min-height: 260px; }
+  aside { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; border-left: none; border-top: 1px solid var(--line); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); gap: 8px; }
+  aside .player { flex: 1 1 calc(50% - 4px); min-width: 0; padding: 9px; }
+  .player .phead { gap: 5px; font-size: 13px; }
+  .player .score { font-size: 25px; }
+  .player .pstats { flex-wrap: wrap; gap: 4px 7px; }
+  .btnrow, .bomb-guide, .ctl { flex: 1 1 100%; width: 100%; min-width: 0; }
+  .btnrow { gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  button { min-height: 44px; }
   .mine-counter { padding: 5px 12px; }
+  footer { text-align: center; line-height: 1.5; }
 
 }
 @media (prefers-reduced-motion: reduce) {
